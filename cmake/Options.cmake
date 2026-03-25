@@ -61,6 +61,7 @@ function(set_options)
     option(OPTION_TOOLS_ONLY "Build only tools target" OFF)
     option(OPTION_DOCS_ONLY "Build only docs target" OFF)
     option(OPTION_ALLOW_INVALID_SIGNATURE "Allow loading of content with invalid signatures" OFF)
+    option(OPTION_ECONOMY_SERVER "Connect to Ferroneer economy server via WebSocket" ON)
     option(OPTION_LINE_IN_DOXYGEN_WARNINGS "Print line number in doxygen warnings" ON)
 
     if (OPTION_DOCS_ONLY)
@@ -110,6 +111,8 @@ function(show_options)
         message(STATUS "Option Allow Invalid Signature - USED")
         message(WARNING "Ignoring invalid signatures is a security risk! Use with care!")
     endif()
+
+    message(STATUS "Option Economy Server - ${OPTION_ECONOMY_SERVER}")
 endfunction()
 
 # Add the definitions for the options that are selected.
@@ -133,5 +136,9 @@ function(add_definitions_based_on_options)
 
     if(OPTION_ALLOW_INVALID_SIGNATURE)
         add_definitions(-DALLOW_INVALID_SIGNATURE)
+    endif()
+
+    if(OPTION_ECONOMY_SERVER)
+        add_definitions(-DWITH_ECONOMY_SERVER)
     endif()
 endfunction()

@@ -1,6 +1,9 @@
 add_subdirectory(core)
 
 add_files(
+    economy_connection.cpp
+    economy_connection.h
+    economy_protocol.h
     network.cpp
     network.h
     network_admin.cpp

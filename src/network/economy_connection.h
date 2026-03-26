@@ -106,6 +106,8 @@ private:
 /** Global economy connection instance (nullptr if economy server is disabled). */
 extern EconomyConnection *_economy_connection;
 
+void EconomyConnectionInit(const std::string &url, const std::string &player_name);
+
 #endif /* WITH_ECONOMY_SERVER */
 
 #endif /* NETWORK_ECONOMY_CONNECTION_H */

@@ -1291,6 +1291,29 @@ void NetworkGameLoop()
 	NetworkSend();
 }
 
+#ifdef WITH_ECONOMY_SERVER
+/**
+ * Initialize the economy server connection.
+ * Called from openttd_main when -E flag is provided, independent of _networking state.
+ * @param url WebSocket URL of the economy server (e.g. "ws://127.0.0.1:9870/ws").
+ * @param player_name The player's display name sent during handshake.
+ */
+void EconomyConnectionInit(const std::string &url, const std::string &player_name)
+{
+	if (_economy_connection != nullptr) return;
+
+	_economy_connection = new EconomyConnection();
+	_economy_connection->Connect(url, player_name);
+	_economy_connection->SetWorldEventCallback([](const nlohmann::json &event) {
+		std::string event_type = event.value("event_type", "");
+		if (event_type == "RoadBuilt") {
+			Debug(net, 1, "[economy] Another player built a road");
+		}
+	});
+	Debug(net, 0, "[economy] Connecting to economy server at {}", url);
+}
+#endif
+
 /** This tries to launch the network for a given OS */
 void NetworkStartUp()
 {
@@ -1307,20 +1330,6 @@ void NetworkStartUp()
 	Debug(net, 3, "Network online, multiplayer available");
 	NetworkFindBroadcastIPs(&_broadcast_list);
 	NetworkHTTPInitialize();
-
-#ifdef WITH_ECONOMY_SERVER
-	/* Create and connect the economy server connection. */
-	_economy_connection = new EconomyConnection();
-	/* TODO: Make URL configurable via settings. */
-	_economy_connection->Connect("ws://127.0.0.1:9870/ws", "Player");
-	_economy_connection->SetWorldEventCallback([](const nlohmann::json &event) {
-		std::string event_type = event.value("event_type", "");
-		if (event_type == "RoadBuilt") {
-			Debug(net, 1, "[economy] Another player built a road");
-			/* TODO: In future phases, inject a local command to render the road. */
-		}
-	});
-#endif
 }
 
 /** This shuts the network down */

@@ -18,6 +18,12 @@
 #include "misc/endian_buffer.hpp"
 #include "tile_map.h"
 
+#ifdef WITH_ECONOMY_SERVER
+class EconomyConnection;
+extern EconomyConnection *_economy_connection;
+#	include "network/economy_send.h"
+#endif
+
 /**
  * Define a default return value for a failed command.
  *
@@ -414,6 +420,21 @@ protected:
 			cur_company.Restore();
 			return res;
 		}
+
+#ifdef WITH_ECONOMY_SERVER
+		/* If economy server is connected and this is an economy command,
+		 * route it there regardless of _networking state. */
+		if constexpr (IsEconomyServerCommand(Tcmd)) {
+			if (_economy_connection != nullptr) {
+				if (::NetworkSendEconomyCommand(Tcmd, err_message, callback, _current_company,
+				                                EndianBufferWriter<CommandDataBuffer>::FromValue(args))) {
+					cur_company.Restore();
+					return {};
+				}
+				/* Returns false means not connected — fall through to local execution. */
+			}
+		}
+#endif
 
 		/* If we are in network, and the command is not from the network
 		 * send it to the command-queue and abort execution. */

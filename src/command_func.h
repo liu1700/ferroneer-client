@@ -18,6 +18,12 @@
 #include "misc/endian_buffer.hpp"
 #include "tile_map.h"
 
+#ifdef WITH_ECONOMY_SERVER
+class EconomyConnection;
+extern EconomyConnection *_economy_connection;
+#	include "network/economy_send.h"
+#endif
+
 /**
  * Define a default return value for a failed command.
  *
@@ -432,6 +438,17 @@ protected:
 
 		/* Actually try and execute the command. */
 		Tret res2 = std::apply(CommandTraits<Tcmd>::proc, std::tuple_cat(std::make_tuple(flags | DoCommandFlag::Execute), args));
+
+#ifdef WITH_ECONOMY_SERVER
+		/* Notify economy server about executed economy commands (fire-and-forget).
+		 * Command executes locally first; server is informed asynchronously. */
+		if constexpr (IsEconomyServerCommand(Tcmd)) {
+			if (_economy_connection != nullptr && !ExtractCommandCost(res2).Failed()) {
+				::NetworkSendEconomyCommand(Tcmd, err_message, callback, _current_company,
+				                            EndianBufferWriter<CommandDataBuffer>::FromValue(args));
+			}
+		}
+#endif
 
 		/* Convention: If the second result element is of type Money,
 		 * this is the additional cash required for the command. */

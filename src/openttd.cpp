@@ -39,6 +39,10 @@
 #include "screenshot.h"
 #include "network/network.h"
 #include "network/network_func.h"
+#ifdef WITH_ECONOMY_SERVER
+#include "network/economy_connection.h"
+#include "network/network_internal.h"
+#endif
 #include "ai/ai.hpp"
 #include "ai/ai_config.hpp"
 #include "settings_func.h"
@@ -474,7 +478,7 @@ static std::vector<OptionData> CreateOptions()
 {
 	std::vector<OptionData> options;
 	/* Options that require a parameter. */
-	for (char c : "GIMSbcmnpqrstv") options.push_back({ .type = ODF_HAS_VALUE, .id = c, .shortname = c });
+	for (char c : "EGIMSbcmnpqrstv") options.push_back({ .type = ODF_HAS_VALUE, .id = c, .shortname = c });
 
 	/* Options with an optional parameter. */
 	for (char c : "Ddg") options.push_back({ .type = ODF_OPTIONAL_VALUE, .id = c, .shortname = c });
@@ -509,6 +513,7 @@ int openttd_main(std::span<std::string_view> arguments)
 	std::unique_ptr<AfterNewGRFScan> scanner = std::make_unique<AfterNewGRFScan>();
 	bool dedicated = false;
 	bool only_local_path = false;
+	std::string economy_server_url;
 
 	extern bool _dedicated_forks;
 	_dedicated_forks = false;
@@ -637,6 +642,7 @@ int openttd_main(std::span<std::string_view> arguments)
 				fmt::print(stderr, "Invalid generation seed: {}\n", mgo.opt);
 			}
 			break;
+		case 'E': economy_server_url = mgo.opt; break;
 		case 'c': _config_file = mgo.opt; break;
 		case 'x': scanner->save_config = false; break;
 		case 'X': only_local_path = true; break;
@@ -803,6 +809,12 @@ int openttd_main(std::span<std::string_view> arguments)
 
 	/* ScanNewGRFFiles now has control over the scanner. */
 	RequestNewGRFScan(scanner.release());
+
+#ifdef WITH_ECONOMY_SERVER
+	if (!economy_server_url.empty()) {
+		EconomyConnectionInit(economy_server_url, "Player");
+	}
+#endif
 
 	VideoDriver::GetInstance()->MainLoop();
 
@@ -1370,6 +1382,12 @@ void GameLoop()
 
 	/* Check for UDP stuff */
 	if (_network_available) NetworkBackgroundLoop();
+
+#ifdef WITH_ECONOMY_SERVER
+	/* Execute economy commands confirmed by the server.
+	 * Must be outside any Backup<CompanyID> scope to avoid assertion failures. */
+	NetworkExecuteEconomyCommandQueue();
+#endif
 
 	DebugSendRemoteMessages();
 

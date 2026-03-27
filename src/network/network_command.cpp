@@ -55,6 +55,7 @@
 #ifdef WITH_ECONOMY_SERVER
 #	include "economy_connection.h"
 #	include "economy_protocol.h"
+#	include "economy_send.h"
 #endif
 
 #include "../safeguards.h"
@@ -186,6 +187,12 @@ static CommandQueue _local_wait_queue;
 /** Local queue of packets waiting for execution. */
 static CommandQueue _local_execution_queue;
 
+#ifdef WITH_ECONOMY_SERVER
+/** Queue for economy commands confirmed by server, awaiting execution in single-player mode.
+ *  Drained at a safe point in the game loop (outside any Backup<CompanyID> scope). */
+static CommandQueue _economy_pending_queue;
+#endif
+
 
 /**
  * Find the callback index of a callback pointer.
@@ -219,6 +226,41 @@ static bool IsEconomyCommand(Commands cmd)
 }
 #endif
 
+#ifdef WITH_ECONOMY_SERVER
+/**
+ * Notify the economy server that a command was executed locally (fire-and-forget).
+ * The command has already been executed; this just informs the server.
+ * @return true if notification was sent, false if not connected.
+ */
+bool NetworkSendEconomyCommand(Commands cmd, StringID err_message,
+	CommandCallback *callback, CompanyID company,
+	const CommandDataBuffer &cmd_data)
+{
+	if (_economy_connection == nullptr || !_economy_connection->IsConnected()) {
+		return false;
+	}
+	if (!IsEconomyCommand(cmd)) {
+		return false;
+	}
+
+	Debug(net, 3, "[economy] Notifying economy server of command {}", static_cast<uint8_t>(cmd));
+
+	nlohmann::json request = EconomyProtocol::MakeBuildRoad(
+		0, 0, 0, 0, 0, static_cast<uint8_t>(cmd == Commands::BuildRoadLong ? 1 : 0)
+	);
+
+	/* Fire-and-forget: log the server's response but don't act on it. */
+	_economy_connection->SendCommand(request, [cmd](uint32_t req_id, bool accepted, const std::string &reason) {
+		if (accepted) {
+			Debug(net, 1, "[economy] Server acknowledged command {} (request_id={})", static_cast<uint8_t>(cmd), req_id);
+		} else {
+			Debug(net, 1, "[economy] Server noted command {} rejection: {} (request_id={})", static_cast<uint8_t>(cmd), reason, req_id);
+		}
+	});
+	return true;
+}
+#endif
+
 /**
  * Prepare a DoCommand to be send over the network
  * @param cmd The command to execute (a CMD_* value)
@@ -230,39 +272,8 @@ static bool IsEconomyCommand(Commands cmd)
 void NetworkSendCommand(Commands cmd, StringID err_message, CommandCallback *callback, CompanyID company, const CommandDataBuffer &cmd_data)
 {
 #ifdef WITH_ECONOMY_SERVER
-	if (_economy_connection != nullptr && _economy_connection->IsConnected() && IsEconomyCommand(cmd)) {
-		/* Route this command through the economy server for authoritative validation. */
-		Debug(net, 3, "[economy] Intercepting command {} for economy server", static_cast<uint8_t>(cmd));
-
-		/* Store the command packet for later execution when the server confirms. */
-		CommandPacket cp;
-		cp.company  = company;
-		cp.cmd      = cmd;
-		cp.err_msg  = err_message;
-		cp.callback = callback;
-		cp.data     = cmd_data;
-		cp.frame    = 0;
-		cp.my_cmd   = true;
-
-		/* For Phase 0, send simplified coordinates. The actual tile coordinates
-		 * are encoded in the command data buffer. For now, send the raw command
-		 * type and let the server log it. */
-		nlohmann::json request = EconomyProtocol::MakeBuildRoad(
-			0, 0, 0, 0, 0, static_cast<uint8_t>(cmd == Commands::BuildRoadLong ? 1 : 0)
-		);
-
-		_economy_connection->SendCommand(request, [cp](uint32_t req_id, bool accepted, const std::string &reason) mutable {
-			if (accepted) {
-				Debug(net, 1, "[economy] Command {} accepted by server (request_id={})", static_cast<uint8_t>(cp.cmd), req_id);
-				/* Execute the command locally now that the server confirmed it. */
-				cp.frame = _frame_counter;
-				_local_execution_queue.push_back(std::move(cp));
-			} else {
-				Debug(net, 1, "[economy] Command {} rejected by server: {} (request_id={})", static_cast<uint8_t>(cp.cmd), reason, req_id);
-				/* TODO: Show rejection reason to player via UI. */
-			}
-		});
-		return; /* Do NOT proceed with the normal network send path. */
+	if (NetworkSendEconomyCommand(cmd, err_message, callback, company, cmd_data)) {
+		return;
 	}
 #endif
 
@@ -344,6 +355,28 @@ void NetworkExecuteLocalCommandQueue()
 	_current_company = _local_company;
 }
 
+#ifdef WITH_ECONOMY_SERVER
+/**
+ * Execute all pending economy commands confirmed by the server.
+ * Called from the game loop at a safe point (outside any Backup<CompanyID> scope).
+ */
+void NetworkExecuteEconomyCommandQueue()
+{
+	if (_economy_pending_queue.empty()) return;
+
+	Backup<CompanyID> cur_company(_current_company);
+	for (auto &cp : _economy_pending_queue) {
+		cur_company.Change(cp.company);
+		size_t cb_index = FindCallbackIndex(cp.callback);
+		if (cb_index < _callback_tuple_size && _cmd_dispatch[cp.cmd].Unpack[cb_index] != nullptr) {
+			_cmd_dispatch[cp.cmd].Unpack[cb_index](cp);
+		}
+	}
+	_economy_pending_queue.clear();
+	cur_company.Restore();
+}
+#endif
+
 /**
  * Free the local command queues.
  */
@@ -351,6 +384,9 @@ void NetworkFreeLocalCommandQueue()
 {
 	_local_wait_queue.clear();
 	_local_execution_queue.clear();
+#ifdef WITH_ECONOMY_SERVER
+	_economy_pending_queue.clear();
+#endif
 }
 
 /**

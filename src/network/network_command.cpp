@@ -228,8 +228,9 @@ static bool IsEconomyCommand(Commands cmd)
 
 #ifdef WITH_ECONOMY_SERVER
 /**
- * Send a command to the economy server. Returns true if sent (command intercepted),
- * false if economy server is not connected (fall through to local execution).
+ * Notify the economy server that a command was executed locally (fire-and-forget).
+ * The command has already been executed; this just informs the server.
+ * @return true if notification was sent, false if not connected.
  */
 bool NetworkSendEconomyCommand(Commands cmd, StringID err_message,
 	CommandCallback *callback, CompanyID company,
@@ -242,35 +243,18 @@ bool NetworkSendEconomyCommand(Commands cmd, StringID err_message,
 		return false;
 	}
 
-	Debug(net, 3, "[economy] Intercepting command {} for economy server", static_cast<uint8_t>(cmd));
-
-	/* Store the command packet for later execution when the server confirms. */
-	CommandPacket cp;
-	cp.company  = company;
-	cp.cmd      = cmd;
-	cp.err_msg  = err_message;
-	cp.callback = callback;
-	cp.data     = cmd_data;
-	cp.frame    = 0;
-	cp.my_cmd   = true;
+	Debug(net, 3, "[economy] Notifying economy server of command {}", static_cast<uint8_t>(cmd));
 
 	nlohmann::json request = EconomyProtocol::MakeBuildRoad(
 		0, 0, 0, 0, 0, static_cast<uint8_t>(cmd == Commands::BuildRoadLong ? 1 : 0)
 	);
 
-	_economy_connection->SendCommand(request, [cp](uint32_t req_id, bool accepted, const std::string &reason) mutable {
+	/* Fire-and-forget: log the server's response but don't act on it. */
+	_economy_connection->SendCommand(request, [cmd](uint32_t req_id, bool accepted, const std::string &reason) {
 		if (accepted) {
-			Debug(net, 1, "[economy] Command {} accepted by server (request_id={})", static_cast<uint8_t>(cp.cmd), req_id);
-			/* Always queue. For single-player, we drain _economy_pending_queue
-			 * at a safe point in the game loop (outside any Backup<CompanyID> scope). */
-			cp.frame = _frame_counter;
-			if (_networking) {
-				_local_execution_queue.push_back(std::move(cp));
-			} else {
-				_economy_pending_queue.push_back(std::move(cp));
-			}
+			Debug(net, 1, "[economy] Server acknowledged command {} (request_id={})", static_cast<uint8_t>(cmd), req_id);
 		} else {
-			Debug(net, 1, "[economy] Command {} rejected by server: {} (request_id={})", static_cast<uint8_t>(cp.cmd), reason, req_id);
+			Debug(net, 1, "[economy] Server noted command {} rejection: {} (request_id={})", static_cast<uint8_t>(cmd), reason, req_id);
 		}
 	});
 	return true;

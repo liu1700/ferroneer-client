@@ -421,21 +421,6 @@ protected:
 			return res;
 		}
 
-#ifdef WITH_ECONOMY_SERVER
-		/* If economy server is connected and this is an economy command,
-		 * route it there regardless of _networking state. */
-		if constexpr (IsEconomyServerCommand(Tcmd)) {
-			if (_economy_connection != nullptr) {
-				if (::NetworkSendEconomyCommand(Tcmd, err_message, callback, _current_company,
-				                                EndianBufferWriter<CommandDataBuffer>::FromValue(args))) {
-					cur_company.Restore();
-					return {};
-				}
-				/* Returns false means not connected — fall through to local execution. */
-			}
-		}
-#endif
-
 		/* If we are in network, and the command is not from the network
 		 * send it to the command-queue and abort execution. */
 		if (send_net) {
@@ -453,6 +438,17 @@ protected:
 
 		/* Actually try and execute the command. */
 		Tret res2 = std::apply(CommandTraits<Tcmd>::proc, std::tuple_cat(std::make_tuple(flags | DoCommandFlag::Execute), args));
+
+#ifdef WITH_ECONOMY_SERVER
+		/* Notify economy server about executed economy commands (fire-and-forget).
+		 * Command executes locally first; server is informed asynchronously. */
+		if constexpr (IsEconomyServerCommand(Tcmd)) {
+			if (_economy_connection != nullptr && !ExtractCommandCost(res2).Failed()) {
+				::NetworkSendEconomyCommand(Tcmd, err_message, callback, _current_company,
+				                            EndianBufferWriter<CommandDataBuffer>::FromValue(args));
+			}
+		}
+#endif
 
 		/* Convention: If the second result element is of type Money,
 		 * this is the additional cash required for the command. */

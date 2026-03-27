@@ -41,6 +41,7 @@
 #include "network/network_func.h"
 #ifdef WITH_ECONOMY_SERVER
 #include "network/economy_connection.h"
+#include "network/network_internal.h"
 #endif
 #include "ai/ai.hpp"
 #include "ai/ai_config.hpp"
@@ -1381,6 +1382,12 @@ void GameLoop()
 
 	/* Check for UDP stuff */
 	if (_network_available) NetworkBackgroundLoop();
+
+#ifdef WITH_ECONOMY_SERVER
+	/* Execute economy commands confirmed by the server.
+	 * Must be outside any Backup<CompanyID> scope to avoid assertion failures. */
+	NetworkExecuteEconomyCommandQueue();
+#endif
 
 	DebugSendRemoteMessages();
 

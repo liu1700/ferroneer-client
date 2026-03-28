@@ -1157,7 +1157,7 @@ static Money DeliverGoods(int num_pieces, CargoType cargo_type, StationID dest, 
 		std::string msg = EconomyProtocol::MakeDeliverCargo(
 			_economy_connection->NextRequestId(),
 			commodity,
-			static_cast<double>(num_pieces),
+			static_cast<double>(accepted_total),
 			ox, oy, dx, dy,
 			static_cast<uint32_t>(periods_in_transit));
 		_economy_connection->Send(nlohmann::json::parse(msg));

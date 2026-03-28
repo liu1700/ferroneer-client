@@ -123,7 +123,7 @@ inline std::string MakePurchaseResourceSite(uint32_t request_id, uint32_t site_i
 		{"type", "CommandRequest"},
 		{"request_id", request_id},
 		{"command", {
-			{"type", "PurchaseResourceSite"},
+			{"cmd", "PurchaseResourceSite"},
 			{"site_id", site_id}
 		}}
 	};
@@ -137,7 +137,7 @@ inline std::string MakeUpgradeResourceSite(uint32_t request_id, uint32_t site_id
 		{"type", "CommandRequest"},
 		{"request_id", request_id},
 		{"command", {
-			{"type", "UpgradeResourceSite"},
+			{"cmd", "UpgradeResourceSite"},
 			{"site_id", site_id}
 		}}
 	};
@@ -151,7 +151,7 @@ inline std::string MakeBuildFactory(uint32_t request_id, uint8_t factory_type, i
 		{"type", "CommandRequest"},
 		{"request_id", request_id},
 		{"command", {
-			{"type", "BuildFactory"},
+			{"cmd", "BuildFactory"},
 			{"factory_type", factory_type},
 			{"tile_x", tile_x},
 			{"tile_y", tile_y}
@@ -168,7 +168,7 @@ inline std::string MakeDeliverCargo(uint32_t request_id, uint8_t cargo_type, dou
 		{"type", "CommandRequest"},
 		{"request_id", request_id},
 		{"command", {
-			{"type", "DeliverCargo"},
+			{"cmd", "DeliverCargo"},
 			{"cargo_type", cargo_type},
 			{"quantity", quantity},
 			{"origin_x", origin_x},
@@ -189,7 +189,7 @@ inline std::string MakePlaceMarketOrder(uint32_t request_id, uint8_t side, uint8
 		{"type", "CommandRequest"},
 		{"request_id", request_id},
 		{"command", {
-			{"type", "PlaceMarketOrder"},
+			{"cmd", "PlaceMarketOrder"},
 			{"side", side},
 			{"commodity", commodity},
 			{"quantity", quantity},
@@ -206,7 +206,7 @@ inline std::string MakeAcceptContract(uint32_t request_id, uint64_t contract_id)
 		{"type", "CommandRequest"},
 		{"request_id", request_id},
 		{"command", {
-			{"type", "AcceptContract"},
+			{"cmd", "AcceptContract"},
 			{"contract_id", contract_id}
 		}}
 	};
@@ -220,7 +220,7 @@ inline std::string MakeDeliverContract(uint32_t request_id, uint64_t contract_id
 		{"type", "CommandRequest"},
 		{"request_id", request_id},
 		{"command", {
-			{"type", "DeliverContract"},
+			{"cmd", "DeliverContract"},
 			{"contract_id", contract_id},
 			{"quantity", quantity}
 		}}

@@ -15,6 +15,7 @@
 #include "../debug.h"
 #include "../console_func.h"
 #include "../core/string_consumer.hpp"
+#include "../ferroneer_welcome_gui.h"
 
 #include "../safeguards.h"
 
@@ -234,6 +235,15 @@ void EconomyConnection::ProcessMessage(const nlohmann::json &msg)
 			}
 
 			_economy_data.valid = true;
+
+			/* Show welcome guide once on first snapshot. */
+			{
+				static bool welcome_shown = false;
+				if (!welcome_shown) {
+					welcome_shown = true;
+					ShowFerroneerWelcomeWindow();
+				}
+			}
 
 			IConsolePrint(CC_INFO, "[Economy] Day {} | Price Index: {} | Faucet: ${:.0f} | Drain: ${:.0f}",
 				_economy_data.day, _economy_data.price_index,

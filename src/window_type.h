@@ -732,6 +732,11 @@ enum WindowClass : uint16_t {
 	 */
 	WC_HELPWIN,
 
+	/**
+	 * Ferroneer welcome / quick-start guide window.
+	 */
+	WC_FERRONEER_WELCOME,
+
 	WC_INVALID = 0xFFFF, ///< Invalid window.
 };
 

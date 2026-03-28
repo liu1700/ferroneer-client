@@ -183,6 +183,8 @@ add_files(
     fileio.cpp
     fileio_func.h
     fileio_type.h
+    ferroneer_welcome_gui.cpp
+    ferroneer_welcome_gui.h
     fios.cpp
     fios.h
     fios_gui.cpp

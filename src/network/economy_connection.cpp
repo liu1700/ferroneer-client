@@ -51,13 +51,13 @@ void EconomyConnection::Connect(const std::string &url, const std::string &playe
 				break;
 
 			case ix::WebSocketMessageType::Open:
-				Debug(net, 1, "[economy] WebSocket connected to server");
+				Debug(net, 1, "[economy] WebSocket connection opened, sending handshake");
 				/* Send the Connect handshake. */
 				this->Send(EconomyProtocol::MakeConnect(this->player_name, "0.1.0"));
 				break;
 
 			case ix::WebSocketMessageType::Close:
-				Debug(net, 1, "[economy] WebSocket disconnected (code={}, reason={})", msg->closeInfo.code, msg->closeInfo.reason);
+				Debug(net, 1, "[economy] WebSocket connection closed (code={}, reason={})", msg->closeInfo.code, msg->closeInfo.reason);
 				this->connected = false;
 				this->player_id = 0;
 				break;
@@ -115,6 +115,8 @@ void EconomyConnection::Send(const nlohmann::json &msg)
 
 void EconomyConnection::Poll()
 {
+	bool was_connected = this->was_connected;
+
 	std::queue<nlohmann::json> to_process;
 
 	{
@@ -126,6 +128,13 @@ void EconomyConnection::Poll()
 		this->ProcessMessage(to_process.front());
 		to_process.pop();
 	}
+
+	/* Detect disconnect on main thread and notify via console. */
+	if (was_connected && !this->connected) {
+		IConsolePrint(CC_WARNING, "[Economy] Disconnected from economy server — commands will execute locally");
+	}
+
+	this->was_connected = this->connected;
 }
 
 void EconomyConnection::SetWorldEventCallback(WorldEventCallback callback)
@@ -156,6 +165,7 @@ void EconomyConnection::ProcessMessage(const nlohmann::json &msg)
 			this->player_id = msg.value("player_id", 0u);
 			this->connected = true;
 			Debug(net, 1, "[economy] Connected! Assigned player_id={}", this->player_id);
+			IConsolePrint(CC_INFO, "[Economy] Connected to economy server (player_id={})", this->player_id);
 			break;
 
 		case EconomyProtocol::ServerMsgType::CommandResult: {

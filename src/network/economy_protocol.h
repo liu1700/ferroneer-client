@@ -77,6 +77,7 @@ enum class ServerMsgType {
 	WorldEvent,
 	ServerTick,
 	Pong,
+	EconomySnapshot,
 	Unknown,
 };
 
@@ -89,6 +90,7 @@ inline ServerMsgType ParseServerMsgType(const nlohmann::json &msg)
 	if (type == "WorldEvent") return ServerMsgType::WorldEvent;
 	if (type == "ServerTick") return ServerMsgType::ServerTick;
 	if (type == "Pong") return ServerMsgType::Pong;
+	if (type == "EconomySnapshot") return ServerMsgType::EconomySnapshot;
 	return ServerMsgType::Unknown;
 }
 

@@ -813,6 +813,15 @@ int openttd_main(std::span<std::string_view> arguments)
 #ifdef WITH_ECONOMY_SERVER
 	if (!economy_server_url.empty()) {
 		EconomyConnectionInit(economy_server_url, "Player");
+
+		/* Auto-load the Ferroneer scenario when connecting to economy server.
+		 * Only if the user did not specify -g (i.e. _switch_mode is still SM_MENU). */
+		if (_switch_mode == SM_MENU) {
+			Debug(net, 1, "[economy] Auto-loading ferroneer scenario: scenario/ferroneer_mvp.scn");
+			_file_to_saveload.name = "scenario/ferroneer_mvp.scn";
+			_file_to_saveload.SetMode(FIOS_TYPE_SCENARIO, SLO_LOAD);
+			_switch_mode = SM_LOAD_GAME;
+		}
 	}
 #endif
 

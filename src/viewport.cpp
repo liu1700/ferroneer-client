@@ -1144,27 +1144,36 @@ draw_inner:
 			if (!is_redsq) DrawTileSelectionRect(ti, _thd.make_square_red ? PALETTE_SEL_TILE_RED : PAL_NONE);
 
 			/* Draw road stop building preview on the selected tile.
-			 * Uses DrawSelectionSprite (tile-local) instead of AddSortableSpriteToDraw
-			 * to avoid sprite bleed into neighboring tiles and dirty rect artifacts. */
+			 * Uses DrawSelectionSprite (tile-local) to avoid bleed and dirty rect artifacts.
+			 * Sprites drawn with PALETTE_TO_TRANSPARENT for a dark silhouette effect,
+			 * rendered twice for better visibility. The green/red selection rect underneath
+			 * provides valid/invalid color feedback. */
 			if (!_thd.make_square_red) {
 				RoadStopPreviewInfo preview = GetRoadStopPlacementPreview();
 				if (preview.active) {
 					StationType st = preview.is_bus ? StationType::Bus : StationType::Truck;
 					const DrawTileSprites *t = GetStationTileLayout(st, preview.orientation);
 
-					/* Draw ground sprite (road/platform). */
+					/* Draw ground sprite. */
 					SpriteID ground_img = t->ground.sprite;
 					if (GB(ground_img, 0, SPRITE_WIDTH) != 0) {
-						DrawSelectionSprite(ground_img, PAL_NONE, ti, 0, FOUNDATION_PART_NORMAL);
+						SpriteID tground = ground_img;
+						SetBit(tground, PALETTE_MODIFIER_TRANSPARENT);
+						DrawSelectionSprite(tground, PALETTE_TO_TRANSPARENT, ti, 0, FOUNDATION_PART_NORMAL);
+						DrawSelectionSprite(tground, PALETTE_TO_TRANSPARENT, ti, 0, FOUNDATION_PART_NORMAL);
+						DrawSelectionSprite(tground, PALETTE_TO_TRANSPARENT, ti, 0, FOUNDATION_PART_NORMAL);
 					}
 
-					/* Draw building sprites as tile-level overlays. */
+					/* Draw all building sequence sprites (parent and child). */
 					for (const DrawTileSeqStruct &dtss : t->GetSequence()) {
 						SpriteID image = dtss.image.sprite;
 						if (GB(image, 0, SPRITE_WIDTH) == 0) continue;
-						if (!dtss.IsParentSprite()) continue;
 
-						DrawSelectionSprite(image, PAL_NONE, ti, dtss.origin.z, FOUNDATION_PART_NORMAL);
+						SpriteID timg = image;
+						SetBit(timg, PALETTE_MODIFIER_TRANSPARENT);
+						DrawSelectionSprite(timg, PALETTE_TO_TRANSPARENT, ti, dtss.origin.z, FOUNDATION_PART_NORMAL);
+						DrawSelectionSprite(timg, PALETTE_TO_TRANSPARENT, ti, dtss.origin.z, FOUNDATION_PART_NORMAL);
+						DrawSelectionSprite(timg, PALETTE_TO_TRANSPARENT, ti, dtss.origin.z, FOUNDATION_PART_NORMAL);
 					}
 				}
 			}

@@ -1107,7 +1107,7 @@ static CommandCost CheckFlatLandRoadStop(TileIndex cur_tile, int &allowed_z, con
 		DiagDirection ddir = (DiagDirection)FindFirstBit(invalid_dirs.base());
 		if (IsInclinedSlope(cur_slope) && GetInclinedSlopeDirection(cur_slope) == ddir) {
 			TileIndex adjacent = TileAddByDiagDir(cur_tile, ddir);
-			if (IsValidTile(adjacent) && (!MayHaveRoad(adjacent) || !HasTileRoadType(adjacent, RTT_ROAD))) {
+			if (IsValidTile(adjacent) && (!MayHaveRoad(adjacent) || (!HasTileRoadType(adjacent, RTT_ROAD) && !HasTileRoadType(adjacent, RTT_TRAM)))) {
 				return CommandCost(STR_FERRONEER_STATION_SLOPE_NO_EXIT);
 			}
 		}

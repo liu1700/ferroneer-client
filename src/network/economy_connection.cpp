@@ -13,12 +13,17 @@
 #ifdef WITH_ECONOMY_SERVER
 
 #include "economy_protocol.h"
+#include "economy_data.h"
 #include "../debug.h"
+#include "../console_func.h"
 
 #include "../safeguards.h"
 
 /* Global instance pointer. */
 EconomyConnection *_economy_connection = nullptr;
+
+/* Global economy data cache. */
+EconomyData _economy_data;
 
 EconomyConnection::EconomyConnection() = default;
 
@@ -192,6 +197,47 @@ void EconomyConnection::ProcessMessage(const nlohmann::json &msg)
 		case EconomyProtocol::ServerMsgType::Pong:
 			/* Could measure RTT here. */
 			break;
+
+		case EconomyProtocol::ServerMsgType::EconomySnapshot: {
+			_economy_data.day = msg.value("day", uint64_t{0});
+			_economy_data.price_index = msg.value("price_index", uint32_t{100});
+			_economy_data.total_money = msg.value("total_money", 0.0);
+			_economy_data.avg_money = msg.value("avg_money", 0.0);
+			_economy_data.gini = msg.value("gini", 0.0);
+			_economy_data.daily_faucet = msg.value("daily_faucet", 0.0);
+			_economy_data.daily_drain = msg.value("daily_drain", 0.0);
+			_economy_data.daily_net = msg.value("daily_net", 0.0);
+
+			/* Parse phase counts. */
+			if (msg.contains("phase_counts")) {
+				const auto &pc = msg["phase_counts"];
+				_economy_data.phase_transport = pc.value("transport", uint32_t{0});
+				_economy_data.phase_industry = pc.value("industry", uint32_t{0});
+				_economy_data.phase_expansion = pc.value("expansion", uint32_t{0});
+			}
+
+			/* Parse commodity prices. */
+			_economy_data.prices.clear();
+			if (msg.contains("prices")) {
+				for (auto &[key, val] : msg["prices"].items()) {
+					_economy_data.prices[key] = val.get<double>();
+				}
+			}
+
+			_economy_data.valid = true;
+
+			IConsolePrint(CC_INFO, "[Economy] Day {} | Price Index: {} | Faucet: ${:.0f} | Drain: ${:.0f}",
+				_economy_data.day, _economy_data.price_index,
+				_economy_data.daily_faucet, _economy_data.daily_drain);
+
+			Debug(net, 3, "[economy] Snapshot received: day={} prices={} pi={}",
+				_economy_data.day, _economy_data.prices.size(), _economy_data.price_index);
+
+			for (auto &[k, v] : _economy_data.prices) {
+				Debug(net, 4, "[economy]   {} = ${:.2f}", k, v);
+			}
+			break;
+		}
 
 		case EconomyProtocol::ServerMsgType::Unknown:
 			Debug(net, 0, "[economy] Unknown server message type");

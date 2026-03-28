@@ -249,6 +249,61 @@ void EconomyConnection::ProcessMessage(const nlohmann::json &msg)
 			break;
 		}
 
+		case EconomyProtocol::ServerMsgType::PlayerEconomyState: {
+			uint32_t pid = msg.value("player_id", 0u);
+			double cash = msg.value("cash", 0.0);
+			std::string phase = msg.value("phase", "transport");
+			IConsolePrint(CC_INFO, "[Economy] Player {} | Cash: ${:.0f} | Phase: {}", pid, cash, phase);
+			if (msg.contains("owned_sites")) {
+				for (const auto &s : msg["owned_sites"]) {
+					IConsolePrint(CC_INFO, "[Economy]   Site #{} level {} output {:.1f}/day",
+						s.value("site_id", 0u), s.value("level", 1u), s.value("daily_output", 0.0));
+				}
+			}
+			if (msg.contains("owned_factories")) {
+				for (const auto &f : msg["owned_factories"]) {
+					IConsolePrint(CC_INFO, "[Economy]   Factory type {} at ({},{})",
+						f.value("factory_type", 0u), f.value("tile_x", 0), f.value("tile_y", 0));
+				}
+			}
+			break;
+		}
+
+		case EconomyProtocol::ServerMsgType::ContractList: {
+			if (msg.contains("contracts")) {
+				IConsolePrint(CC_INFO, "[Economy] Contracts ({}):", msg["contracts"].size());
+				for (const auto &c : msg["contracts"]) {
+					IConsolePrint(CC_INFO, "[Economy]   #{} {} {:.0f}t {}→{} | ${:.0f} | status: {} | deadline: day {}",
+						c.value("contract_id", 0ull),
+						c.value("commodity", "?"),
+						c.value("quantity", 0.0),
+						c.value("origin_town", "?"),
+						c.value("destination_town", "?"),
+						c.value("payment", 0.0),
+						c.value("status", "?"),
+						c.value("deadline_day", 0ull));
+				}
+			}
+			break;
+		}
+
+		case EconomyProtocol::ServerMsgType::MarketOrderList: {
+			if (msg.contains("orders")) {
+				IConsolePrint(CC_INFO, "[Economy] Market Orders ({}):", msg["orders"].size());
+				for (const auto &o : msg["orders"]) {
+					IConsolePrint(CC_INFO, "[Economy]   #{} {} {} {:.1f}t @ ${:.0f} | player {} | expires day {}",
+						o.value("order_id", 0ull),
+						o.value("side", "?"),
+						o.value("commodity", "?"),
+						o.value("quantity", 0.0),
+						o.value("price_per_ton", 0.0),
+						o.value("player_id", 0u),
+						o.value("expires_day", 0ull));
+				}
+			}
+			break;
+		}
+
 		case EconomyProtocol::ServerMsgType::Unknown:
 			Debug(net, 0, "[economy] Unknown server message type");
 			break;

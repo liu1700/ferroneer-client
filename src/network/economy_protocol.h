@@ -78,6 +78,9 @@ enum class ServerMsgType {
 	ServerTick,
 	Pong,
 	EconomySnapshot,
+	PlayerEconomyState,
+	ContractList,
+	MarketOrderList,
 	Unknown,
 };
 
@@ -91,6 +94,9 @@ inline ServerMsgType ParseServerMsgType(const nlohmann::json &msg)
 	if (type == "ServerTick") return ServerMsgType::ServerTick;
 	if (type == "Pong") return ServerMsgType::Pong;
 	if (type == "EconomySnapshot") return ServerMsgType::EconomySnapshot;
+	if (type == "PlayerEconomyState") return ServerMsgType::PlayerEconomyState;
+	if (type == "ContractList") return ServerMsgType::ContractList;
+	if (type == "MarketOrderList") return ServerMsgType::MarketOrderList;
 	return ServerMsgType::Unknown;
 }
 

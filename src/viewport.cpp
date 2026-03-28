@@ -1141,32 +1141,22 @@ static void DrawTileSelection(const TileInfo *ti)
 			IsInsideBS(ti->y, _thd.pos.y, _thd.size.y)) {
 draw_inner:
 		if (_thd.drawstyle & HT_RECT) {
-			/* Draw road stop building preview BEFORE selection rect so the
-			 * green/red border renders on top and remains visible. */
+			/* Draw road stop building preview: dark silhouette for building shape,
+			 * then prominent green/red selection border for valid/invalid feedback. */
 			if (!_thd.make_square_red) {
 				RoadStopPreviewInfo preview = GetRoadStopPlacementPreview();
 				if (preview.active) {
 					StationType st = preview.is_bus ? StationType::Bus : StationType::Truck;
 					const DrawTileSprites *t = GetStationTileLayout(st, preview.orientation);
 
-					/* Draw ground sprite with transparent silhouette (3x for visibility). */
-					SpriteID ground_img = t->ground.sprite;
-					if (GB(ground_img, 0, SPRITE_WIDTH) != 0) {
-						SpriteID tground = ground_img;
-						SetBit(tground, PALETTE_MODIFIER_TRANSPARENT);
-						DrawSelectionSprite(tground, PALETTE_TO_TRANSPARENT, ti, 0, FOUNDATION_PART_NORMAL);
-						DrawSelectionSprite(tground, PALETTE_TO_TRANSPARENT, ti, 0, FOUNDATION_PART_NORMAL);
-						DrawSelectionSprite(tground, PALETTE_TO_TRANSPARENT, ti, 0, FOUNDATION_PART_NORMAL);
-					}
-
-					/* Draw all building sequence sprites at correct positions. */
+					/* Draw building sequence sprites as dark silhouettes at correct positions.
+					 * Skip ground sprite — the selection border provides ground-level feedback. */
 					for (const DrawTileSeqStruct &dtss : t->GetSequence()) {
 						SpriteID image = dtss.image.sprite;
 						if (GB(image, 0, SPRITE_WIDTH) == 0) continue;
 
 						SpriteID timg = image;
 						SetBit(timg, PALETTE_MODIFIER_TRANSPARENT);
-						/* Place at correct world position within the tile. */
 						AddTileSpriteToDraw(timg, PALETTE_TO_TRANSPARENT,
 							ti->x + dtss.origin.x, ti->y + dtss.origin.y, ti->z + dtss.origin.z);
 						AddTileSpriteToDraw(timg, PALETTE_TO_TRANSPARENT,
@@ -1177,7 +1167,13 @@ draw_inner:
 				}
 			}
 
-			if (!is_redsq) DrawTileSelectionRect(ti, _thd.make_square_red ? PALETTE_SEL_TILE_RED : PAL_NONE);
+			/* Draw selection border — 3x for visibility when preview is active. */
+			if (!is_redsq) {
+				PaletteID sel_pal = _thd.make_square_red ? PALETTE_SEL_TILE_RED : PAL_NONE;
+				DrawTileSelectionRect(ti, sel_pal);
+				DrawTileSelectionRect(ti, sel_pal);
+				DrawTileSelectionRect(ti, sel_pal);
+			}
 		} else if (_thd.drawstyle & HT_POINT) {
 			/* Figure out the Z coordinate for the single dot. */
 			int z = 0;

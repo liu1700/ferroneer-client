@@ -1566,12 +1566,52 @@ public:
 		CheckRedrawStationCoverage(this);
 	}
 
+	static constexpr int BRSHK_ROTATE = 1000;
+
+	EventState OnHotkey(int hotkey) override
+	{
+		if (hotkey == BRSHK_ROTATE) {
+			const RoadStopSpec *spec = RoadStopClass::Get(_roadstop_gui.sel_class)->GetSpec(_roadstop_gui.sel_type);
+			bool drive_through_only = (spec != nullptr && spec->flags.Test(RoadStopSpecFlag::DriveThroughOnly));
+			bool is_tram = RoadTypeIsTram(_cur_roadtype);
+
+			this->RaiseWidget(WID_BROS_STATION_NE + _roadstop_gui.orientation);
+
+			if (drive_through_only || is_tram) {
+				/* Drive-through only or tram: toggle between X (DIAGDIR_END) and Y (DIAGDIR_END+1) */
+				if (_roadstop_gui.orientation == DIAGDIR_END) {
+					_roadstop_gui.orientation = static_cast<DiagDirection>(DIAGDIR_END + 1);
+				} else {
+					_roadstop_gui.orientation = DIAGDIR_END;
+				}
+			} else {
+				/* Normal road stop: cycle NE -> SE -> SW -> NW -> DT-X -> DT-Y -> NE */
+				int next = static_cast<int>(_roadstop_gui.orientation) + 1;
+				if (next > static_cast<int>(DIAGDIR_END) + 1) {
+					_roadstop_gui.orientation = DIAGDIR_NE;
+				} else {
+					_roadstop_gui.orientation = static_cast<DiagDirection>(next);
+				}
+			}
+
+			this->LowerWidget(WID_BROS_STATION_NE + _roadstop_gui.orientation);
+			this->CheckOrientationValid();
+			SndClickBeep();
+			this->SetDirty();
+			CloseWindowById(WC_SELECT_STATION, 0);
+			return ES_HANDLED;
+		}
+		return this->PickerWindow::OnHotkey(hotkey);
+	}
+
 	static inline HotkeyList road_hotkeys{"buildroadstop", {
 		Hotkey('F', "focus_filter_box", PCWHK_FOCUS_FILTER_BOX),
+		Hotkey('R', "rotate_orientation", BRSHK_ROTATE),
 	}};
 
 	static inline HotkeyList tram_hotkeys{"buildtramstop", {
 		Hotkey('F', "focus_filter_box", PCWHK_FOCUS_FILTER_BOX),
+		Hotkey('R', "rotate_orientation", BRSHK_ROTATE),
 	}};
 };
 

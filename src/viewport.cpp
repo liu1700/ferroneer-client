@@ -1143,27 +1143,28 @@ draw_inner:
 		if (_thd.drawstyle & HT_RECT) {
 			if (!is_redsq) DrawTileSelectionRect(ti, _thd.make_square_red ? PALETTE_SEL_TILE_RED : PAL_NONE);
 
-			/* Draw transparent road stop building preview on the selected tile. */
+			/* Draw road stop building preview on the selected tile.
+			 * Uses DrawSelectionSprite (tile-local) instead of AddSortableSpriteToDraw
+			 * to avoid sprite bleed into neighboring tiles and dirty rect artifacts. */
 			if (!_thd.make_square_red) {
 				RoadStopPreviewInfo preview = GetRoadStopPlacementPreview();
 				if (preview.active) {
 					StationType st = preview.is_bus ? StationType::Bus : StationType::Truck;
 					const DrawTileSprites *t = GetStationTileLayout(st, preview.orientation);
 
-					/* Draw ground sprite transparently. */
+					/* Draw ground sprite (road/platform). */
 					SpriteID ground_img = t->ground.sprite;
 					if (GB(ground_img, 0, SPRITE_WIDTH) != 0) {
-						SetBit(ground_img, PALETTE_MODIFIER_TRANSPARENT);
-						DrawSelectionSprite(ground_img, PALETTE_TO_TRANSPARENT, ti, 0, FOUNDATION_PART_NORMAL);
+						DrawSelectionSprite(ground_img, PAL_NONE, ti, 0, FOUNDATION_PART_NORMAL);
 					}
 
-					/* Draw building sequence sprites transparently. */
+					/* Draw building sprites as tile-level overlays. */
 					for (const DrawTileSeqStruct &dtss : t->GetSequence()) {
 						SpriteID image = dtss.image.sprite;
 						if (GB(image, 0, SPRITE_WIDTH) == 0) continue;
 						if (!dtss.IsParentSprite()) continue;
 
-						AddSortableSpriteToDraw(image, PALETTE_TO_TRANSPARENT, ti->x + dtss.origin.x, ti->y + dtss.origin.y, ti->z + dtss.origin.z, dtss, true);
+						DrawSelectionSprite(image, PAL_NONE, ti, dtss.origin.z, FOUNDATION_PART_NORMAL);
 					}
 				}
 			}

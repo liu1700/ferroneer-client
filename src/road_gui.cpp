@@ -1626,6 +1626,7 @@ public:
 			this->CheckOrientationValid();
 			SndClickBeep();
 			this->SetDirty();
+			MarkWholeScreenDirty();
 			CloseWindowById(WC_SELECT_STATION, 0);
 			return ES_HANDLED;
 		}

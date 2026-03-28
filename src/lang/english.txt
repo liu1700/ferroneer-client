@@ -6031,3 +6031,19 @@ STR_BADGE_CONFIG_FILTERS                                        :{WHITE}Badge Fi
 STR_BADGE_CONFIG_PREVIEW                                        :Preview Image
 STR_BADGE_CONFIG_NAME                                           :Name
 STR_BADGE_FILTER_ANY_LABEL                                      :Any {STRING}
+
+############ Ferroneer
+STR_FERRONEER_WELCOME_TITLE                                     :Welcome to Ferroneer!
+STR_FERRONEER_WELCOME_GUIDE                                     :{BLACK}Quick Start Guide:
+STR_FERRONEER_WELCOME_STEP1                                     :{BLACK}1. Build a truck station next to a road near a town
+STR_FERRONEER_WELCOME_STEP1_HINT                                :{BLACK}   (Road toolbar {RIGHT_ARROW} Truck station button)
+STR_FERRONEER_WELCOME_STEP1_TIP                                 :{BLACK}   Tip: Press R to rotate station direction
+STR_FERRONEER_WELCOME_STEP2                                     :{BLACK}2. Build a second truck station at another town
+STR_FERRONEER_WELCOME_STEP3                                     :{BLACK}3. Buy a truck and set up a route
+STR_FERRONEER_WELCOME_STEP3_HINT                                :{BLACK}   (Station window {RIGHT_ARROW} New vehicles)
+STR_FERRONEER_WELCOME_STEP3_TIP                                 :{BLACK}   Trucks automatically wait for a full load
+STR_FERRONEER_WELCOME_STEP4                                     :{BLACK}4. Delivered cargo earns income from the economy server
+STR_FERRONEER_WELCOME_DISMISS                                   :{BLACK}Got it
+STR_FERRONEER_WELCOME_NEVER                                     :{BLACK}Don't show again
+STR_FERRONEER_STATION_SLOPE_HINT                                :Station entrance incompatible with slope. Press R to rotate.
+STR_FERRONEER_STATION_SLOPE_NO_EXIT                             :Vehicles cannot exit: entrance faces uphill with no road.

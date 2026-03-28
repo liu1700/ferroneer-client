@@ -23,4 +23,12 @@ DropDownList GetRoadTypeDropDownList(RoadTramTypes rtts, bool for_replacement = 
 DropDownList GetScenRoadTypeDropDownList(RoadTramTypes rtts);
 void InitializeRoadGUI();
 
+/** Info needed to draw a road stop placement preview. */
+struct RoadStopPreviewInfo {
+	bool active;         ///< Whether a road stop picker is currently open.
+	uint8_t orientation; ///< Station gfx index (0-3 bay, 4-5 drive-through).
+	bool is_bus;         ///< True for bus stop, false for truck stop.
+};
+RoadStopPreviewInfo GetRoadStopPlacementPreview();
+
 #endif /* ROAD_GUI_H */

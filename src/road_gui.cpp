@@ -81,6 +81,34 @@ struct RoadStopPickerSelection {
 };
 static RoadStopPickerSelection _roadstop_gui;
 
+/**
+ * Get road stop placement preview info for transparent building preview.
+ * @return Preview info with active=true if a road stop picker window is open.
+ */
+RoadStopPreviewInfo GetRoadStopPlacementPreview()
+{
+	RoadStopPreviewInfo info{};
+	info.active = false;
+
+	bool is_bus;
+	if (FindWindowByClass(WC_BUS_STATION) != nullptr) {
+		is_bus = true;
+	} else if (FindWindowByClass(WC_TRUCK_STATION) != nullptr) {
+		is_bus = false;
+	} else {
+		return info;
+	}
+
+	/* Only draw preview for default station class (skip NewGRF custom stations) */
+	const RoadStopSpec *spec = RoadStopClass::Get(_roadstop_gui.sel_class)->GetSpec(_roadstop_gui.sel_type);
+	if (spec != nullptr) return info;
+
+	info.active = true;
+	info.is_bus = is_bus;
+	info.orientation = static_cast<uint8_t>(_roadstop_gui.orientation);
+	return info;
+}
+
 static bool IsRoadStopEverAvailable(const RoadStopSpec *spec, StationType type)
 {
 	if (spec == nullptr) return true;

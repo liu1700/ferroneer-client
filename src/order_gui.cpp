@@ -427,7 +427,9 @@ static Order GetOrderCmdFromTile(const Vehicle *v, TileIndex tile)
 			}
 			if (st->facilities.Any(facil)) {
 				order.MakeGoToStation(st->index);
-				if (_ctrl_pressed) order.SetLoadType(OrderLoadType::FullLoadAny);
+				/* Ferroneer: default to Full Load Any so cargo always fills before departure.
+				 * Ctrl-click still works — it becomes a no-op since default is already FullLoadAny. */
+				order.SetLoadType(OrderLoadType::FullLoadAny);
 				if (_settings_client.gui.new_nonstop && v->IsGroundVehicle()) order.SetNonStopType(OrderNonStopFlag::NonStop);
 				order.SetStopLocation(v->type == VEH_TRAIN ? (OrderStopLocation)(_settings_client.gui.stop_location) : OrderStopLocation::FarEnd);
 				return order;

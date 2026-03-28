@@ -10,7 +10,6 @@
 #ifndef NETWORK_ECONOMY_CONNECTION_H
 #define NETWORK_ECONOMY_CONNECTION_H
 
-#ifdef WITH_ECONOMY_SERVER
 
 #include <ixwebsocket/IXWebSocket.h>
 #include <nlohmann/json.hpp>
@@ -124,7 +123,5 @@ bool ConEconomyDeliverContract(std::span<std::string_view> argv);
 bool ConEconomyQueryPlayer(std::span<std::string_view> argv);
 bool ConEconomyQueryContracts(std::span<std::string_view> argv);
 bool ConEconomyQueryMarket(std::span<std::string_view> argv);
-
-#endif /* WITH_ECONOMY_SERVER */
 
 #endif /* NETWORK_ECONOMY_CONNECTION_H */

@@ -158,10 +158,8 @@ if(NOT OPTION_DEDICATED)
     find_package(OpusFile)
 endif()
 
-if(OPTION_ECONOMY_SERVER)
-    find_package(ixwebsocket CONFIG REQUIRED)
-    find_package(nlohmann_json CONFIG REQUIRED)
-endif()
+find_package(ixwebsocket CONFIG REQUIRED)
+find_package(nlohmann_json CONFIG REQUIRED)
 if(APPLE)
     enable_language(OBJCXX)
 
@@ -347,9 +345,7 @@ if(NOT OPTION_DEDICATED)
     endif()
 endif()
 
-if(OPTION_ECONOMY_SERVER)
-    target_link_libraries(openttd_lib ixwebsocket::ixwebsocket nlohmann_json::nlohmann_json)
-endif()
+target_link_libraries(openttd_lib ixwebsocket::ixwebsocket nlohmann_json::nlohmann_json)
 
 include(3rdparty/llvm/CheckAtomic)
 

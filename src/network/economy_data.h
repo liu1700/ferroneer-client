@@ -10,7 +10,6 @@
 #ifndef NETWORK_ECONOMY_DATA_H
 #define NETWORK_ECONOMY_DATA_H
 
-#ifdef WITH_ECONOMY_SERVER
 
 #include <map>
 #include <string>
@@ -38,5 +37,4 @@ struct EconomyData {
 
 extern EconomyData _economy_data;
 
-#endif /* WITH_ECONOMY_SERVER */
 #endif /* NETWORK_ECONOMY_DATA_H */

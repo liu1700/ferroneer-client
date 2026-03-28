@@ -10,7 +10,6 @@
 #ifndef NETWORK_ECONOMY_PROTOCOL_H
 #define NETWORK_ECONOMY_PROTOCOL_H
 
-#ifdef WITH_ECONOMY_SERVER
 
 #include <nlohmann/json.hpp>
 #include <string>
@@ -274,7 +273,5 @@ inline uint8_t MapCargoToEconomyCommodity(const std::string &label)
 }
 
 } /* namespace EconomyProtocol */
-
-#endif /* WITH_ECONOMY_SERVER */
 
 #endif /* NETWORK_ECONOMY_PROTOCOL_H */

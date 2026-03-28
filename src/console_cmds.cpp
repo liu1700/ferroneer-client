@@ -50,9 +50,7 @@
 #include "network/network_content.h"
 #endif /* WITH_ZLIB */
 
-#ifdef WITH_ECONOMY_SERVER
 #include "network/economy_connection.h"
-#endif /* WITH_ECONOMY_SERVER */
 
 #include "table/strings.h"
 
@@ -3107,7 +3105,6 @@ void IConsoleStdLibRegister()
 	IConsole::CmdRegister("dump_info",               ConDumpInfo);
 
 	/* Economy server commands */
-#ifdef WITH_ECONOMY_SERVER
 	IConsole::CmdRegister("economy_buy_site",         ConEconomyBuySite);
 	IConsole::CmdRegister("economy_upgrade_site",     ConEconomyUpgradeSite);
 	IConsole::CmdRegister("economy_build_factory",    ConEconomyBuildFactory);
@@ -3117,5 +3114,4 @@ void IConsoleStdLibRegister()
 	IConsole::CmdRegister("economy_query_player",     ConEconomyQueryPlayer);
 	IConsole::CmdRegister("economy_query_contracts",  ConEconomyQueryContracts);
 	IConsole::CmdRegister("economy_query_market",     ConEconomyQueryMarket);
-#endif /* WITH_ECONOMY_SERVER */
 }

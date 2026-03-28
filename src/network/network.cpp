@@ -42,9 +42,7 @@
 #	include "../fileio_func.h"
 #	include "../core/string_consumer.hpp"
 #endif
-#ifdef WITH_ECONOMY_SERVER
 #	include "economy_connection.h"
-#endif
 #include <charconv>
 
 #include "table/strings.h"
@@ -1090,11 +1088,9 @@ void NetworkBackgroundLoop()
 
 	NetworkBackgroundUDPLoop();
 
-#ifdef WITH_ECONOMY_SERVER
 	if (_economy_connection != nullptr) {
 		_economy_connection->Poll();
 	}
-#endif
 }
 
 /**
@@ -1291,7 +1287,6 @@ void NetworkGameLoop()
 	NetworkSend();
 }
 
-#ifdef WITH_ECONOMY_SERVER
 /**
  * Initialize the economy server connection.
  * Called from openttd_main when -E flag is provided, independent of _networking state.
@@ -1312,7 +1307,6 @@ void EconomyConnectionInit(const std::string &url, const std::string &player_nam
 	});
 	Debug(net, 0, "[economy] Connecting to economy server at {}", url);
 }
-#endif
 
 /** This tries to launch the network for a given OS */
 void NetworkStartUp()
@@ -1335,10 +1329,8 @@ void NetworkStartUp()
 /** This shuts the network down */
 void NetworkShutDown()
 {
-#ifdef WITH_ECONOMY_SERVER
 	delete _economy_connection;
 	_economy_connection = nullptr;
-#endif
 
 	NetworkDisconnect();
 	NetworkHTTPUninitialize();

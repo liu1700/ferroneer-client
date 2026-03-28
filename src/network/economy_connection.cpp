@@ -10,8 +10,6 @@
 #include "../stdafx.h"
 #include "economy_connection.h"
 
-#ifdef WITH_ECONOMY_SERVER
-
 #include "economy_protocol.h"
 #include "economy_data.h"
 #include "../debug.h"
@@ -586,5 +584,3 @@ bool ConEconomyQueryMarket(std::span<std::string_view> argv)
 	}
 	return true;
 }
-
-#endif /* WITH_ECONOMY_SERVER */

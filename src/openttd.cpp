@@ -39,10 +39,8 @@
 #include "screenshot.h"
 #include "network/network.h"
 #include "network/network_func.h"
-#ifdef WITH_ECONOMY_SERVER
 #include "network/economy_connection.h"
 #include "network/network_internal.h"
-#endif
 #include "ai/ai.hpp"
 #include "ai/ai_config.hpp"
 #include "settings_func.h"
@@ -810,7 +808,6 @@ int openttd_main(std::span<std::string_view> arguments)
 	/* ScanNewGRFFiles now has control over the scanner. */
 	RequestNewGRFScan(scanner.release());
 
-#ifdef WITH_ECONOMY_SERVER
 	if (!economy_server_url.empty()) {
 		EconomyConnectionInit(economy_server_url, "Player");
 
@@ -823,7 +820,6 @@ int openttd_main(std::span<std::string_view> arguments)
 			_switch_mode = SM_LOAD_GAME;
 		}
 	}
-#endif
 
 	VideoDriver::GetInstance()->MainLoop();
 
@@ -1392,11 +1388,9 @@ void GameLoop()
 	/* Check for UDP stuff */
 	if (_network_available) NetworkBackgroundLoop();
 
-#ifdef WITH_ECONOMY_SERVER
 	/* Execute economy commands confirmed by the server.
 	 * Must be outside any Backup<CompanyID> scope to avoid assertion failures. */
 	NetworkExecuteEconomyCommandQueue();
-#endif
 
 	DebugSendRemoteMessages();
 

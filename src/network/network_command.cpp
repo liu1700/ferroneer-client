@@ -52,11 +52,9 @@
 #include "../waypoint_cmd.h"
 #include "../script/script_cmd.h"
 
-#ifdef WITH_ECONOMY_SERVER
 #	include "economy_connection.h"
 #	include "economy_protocol.h"
 #	include "economy_send.h"
-#endif
 
 #include "../safeguards.h"
 
@@ -187,11 +185,9 @@ static CommandQueue _local_wait_queue;
 /** Local queue of packets waiting for execution. */
 static CommandQueue _local_execution_queue;
 
-#ifdef WITH_ECONOMY_SERVER
 /** Queue for economy commands confirmed by server, awaiting execution in single-player mode.
  *  Drained at a safe point in the game loop (outside any Backup<CompanyID> scope). */
 static CommandQueue _economy_pending_queue;
-#endif
 
 
 /**
@@ -208,7 +204,6 @@ static size_t FindCallbackIndex(CommandCallback *callback)
 	return std::numeric_limits<size_t>::max();
 }
 
-#ifdef WITH_ECONOMY_SERVER
 /**
  * Check if a command should be routed to the economy server.
  * @param cmd The command to check.
@@ -224,9 +219,8 @@ static bool IsEconomyCommand(Commands cmd)
 			return false;
 	}
 }
-#endif
 
-#ifdef WITH_ECONOMY_SERVER
+
 /**
  * Read a little-endian uint32 from a CommandDataBuffer at the given offset.
  * @param buf The command data buffer to read from.
@@ -300,7 +294,6 @@ bool NetworkSendEconomyCommand(Commands cmd, StringID err_message,
 	});
 	return true;
 }
-#endif
 
 /**
  * Prepare a DoCommand to be send over the network
@@ -312,11 +305,9 @@ bool NetworkSendEconomyCommand(Commands cmd, StringID err_message,
  */
 void NetworkSendCommand(Commands cmd, StringID err_message, CommandCallback *callback, CompanyID company, const CommandDataBuffer &cmd_data)
 {
-#ifdef WITH_ECONOMY_SERVER
 	if (NetworkSendEconomyCommand(cmd, err_message, callback, company, cmd_data)) {
 		return;
 	}
-#endif
 
 	CommandPacket c;
 	c.company  = company;
@@ -396,7 +387,6 @@ void NetworkExecuteLocalCommandQueue()
 	_current_company = _local_company;
 }
 
-#ifdef WITH_ECONOMY_SERVER
 /**
  * Execute all pending economy commands confirmed by the server.
  * Called from the game loop at a safe point (outside any Backup<CompanyID> scope).
@@ -416,7 +406,6 @@ void NetworkExecuteEconomyCommandQueue()
 	_economy_pending_queue.clear();
 	cur_company.Restore();
 }
-#endif
 
 /**
  * Free the local command queues.
@@ -425,9 +414,7 @@ void NetworkFreeLocalCommandQueue()
 {
 	_local_wait_queue.clear();
 	_local_execution_queue.clear();
-#ifdef WITH_ECONOMY_SERVER
 	_economy_pending_queue.clear();
-#endif
 }
 
 /**

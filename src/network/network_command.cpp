@@ -228,8 +228,24 @@ static bool IsEconomyCommand(Commands cmd)
 
 #ifdef WITH_ECONOMY_SERVER
 /**
+ * Read a little-endian uint32 from a CommandDataBuffer at the given offset.
+ * @param buf The command data buffer to read from.
+ * @param offset Byte offset into the buffer.
+ * @return The decoded uint32 value, or 0 if the buffer is too small.
+ */
+static uint32_t ReadLE32(const CommandDataBuffer &buf, size_t offset)
+{
+	if (offset + 4 > buf.size()) return 0;
+	return static_cast<uint32_t>(buf[offset])
+	     | (static_cast<uint32_t>(buf[offset + 1]) << 8)
+	     | (static_cast<uint32_t>(buf[offset + 2]) << 16)
+	     | (static_cast<uint32_t>(buf[offset + 3]) << 24);
+}
+
+/**
  * Notify the economy server that a command was executed locally (fire-and-forget).
  * The command has already been executed; this just informs the server.
+ * Extracts real tile coordinates from the CommandDataBuffer.
  * @return true if notification was sent, false if not connected.
  */
 bool NetworkSendEconomyCommand(Commands cmd, StringID err_message,
@@ -243,18 +259,43 @@ bool NetworkSendEconomyCommand(Commands cmd, StringID err_message,
 		return false;
 	}
 
-	Debug(net, 3, "[economy] Notifying economy server of command {}", static_cast<uint8_t>(cmd));
+	Debug(net, 3, "[economy] Notifying economy server of command {} (data_size={})",
+		static_cast<uint8_t>(cmd), cmd_data.size());
 
-	nlohmann::json request = EconomyProtocol::MakeBuildRoad(
-		0, 0, 0, 0, 0, static_cast<uint8_t>(cmd == Commands::BuildRoadLong ? 1 : 0)
-	);
+	/* TODO: get map_size_x from server config instead of hardcoding */
+	const uint16_t map_size_x = 512;
 
-	/* Fire-and-forget: log the server's response but don't act on it. */
+	nlohmann::json request;
+	if (cmd == Commands::BuildRoadLong) {
+		/* CmdBuildLongRoad: end_tile(u32 LE), start_tile(u32 LE), ... */
+		uint32_t end_tile = ReadLE32(cmd_data, 0);
+		uint32_t start_tile = ReadLE32(cmd_data, 4);
+
+		int32_t x1 = static_cast<int32_t>(start_tile % map_size_x);
+		int32_t y1 = static_cast<int32_t>(start_tile / map_size_x);
+		int32_t x2 = static_cast<int32_t>(end_tile % map_size_x);
+		int32_t y2 = static_cast<int32_t>(end_tile / map_size_x);
+
+		Debug(net, 1, "[economy] BuildRoadLong: ({},{}) -> ({},{})", x1, y1, x2, y2);
+		request = EconomyProtocol::MakeBuildRoad(0, x1, y1, x2, y2, 1);
+	} else {
+		/* CmdBuildRoad: tile(u32 LE), ... */
+		uint32_t tile = ReadLE32(cmd_data, 0);
+
+		int32_t x = static_cast<int32_t>(tile % map_size_x);
+		int32_t y = static_cast<int32_t>(tile / map_size_x);
+
+		Debug(net, 1, "[economy] BuildRoad: ({},{})", x, y);
+		request = EconomyProtocol::MakeBuildRoad(0, x, y, x, y, 0);
+	}
+
 	_economy_connection->SendCommand(request, [cmd](uint32_t req_id, bool accepted, const std::string &reason) {
 		if (accepted) {
-			Debug(net, 1, "[economy] Server acknowledged command {} (request_id={})", static_cast<uint8_t>(cmd), req_id);
+			Debug(net, 1, "[economy] Server acknowledged command {} (request_id={})",
+				static_cast<uint8_t>(cmd), req_id);
 		} else {
-			Debug(net, 1, "[economy] Server noted command {} rejection: {} (request_id={})", static_cast<uint8_t>(cmd), reason, req_id);
+			Debug(net, 1, "[economy] Server noted command {} rejection: {} (request_id={})",
+				static_cast<uint8_t>(cmd), reason, req_id);
 		}
 	});
 	return true;

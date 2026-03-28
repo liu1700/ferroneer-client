@@ -88,6 +88,7 @@ private:
 	std::string player_name;                                     ///< Player name sent during Connect.
 	uint32_t player_id = 0;                                      ///< Server-assigned player id.
 	bool connected = false;                                      ///< Whether we have received ConnectAck.
+	bool was_connected = false;                                  ///< Tracks previous connected state for disconnect detection in Poll().
 	uint32_t next_request_id = 1;                                ///< Monotonic request id counter.
 
 	mutable std::mutex mutex;                                    ///< Protects the message queue and callbacks.

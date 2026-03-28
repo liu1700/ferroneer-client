@@ -99,7 +99,7 @@ static constexpr NWidgetPart _nested_ferroneer_welcome_widgets[] = {
 };
 
 static WindowDesc _ferroneer_welcome_desc(
-	WDP_CENTER, nullptr, 0, 0,
+	WDP_CENTER, {}, 0, 0,
 	WC_FERRONEER_WELCOME, WC_NONE,
 	{},
 	_nested_ferroneer_welcome_widgets

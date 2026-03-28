@@ -60,10 +60,8 @@
 #include "table/strings.h"
 #include "table/pricebase.h"
 
-#ifdef WITH_ECONOMY_SERVER
 #include "network/economy_connection.h"
 #include "network/economy_protocol.h"
-#endif /* WITH_ECONOMY_SERVER */
 
 #include "safeguards.h"
 
@@ -1091,128 +1089,82 @@ static Money DeliverGoods(int num_pieces, CargoType cargo_type, StationID dest, 
 {
 	assert(num_pieces > 0);
 
-#ifdef WITH_ECONOMY_SERVER
 	/* Economy server intercept — server is authoritative for all income.
 	 * We still perform the visual/gameplay delivery (industry acceptance, station
 	 * stats, company stats, town counters) so the game world looks correct, but
 	 * return 0 income.  The server will credit the player asynchronously. */
-	{
-		Station *st = Station::Get(dest);
-
-		/* Deliver to industry for visual/gameplay effects. */
-		uint accepted_ind = DeliverGoodsToIndustry(st, cargo_type, num_pieces, src.type == SourceType::Industry ? src.ToIndustryID() : IndustryID::Invalid(), company->index);
-		uint accepted_total = HasBit(st->always_accepted, cargo_type) ? num_pieces : accepted_ind;
-
-		/* Update station statistics. */
-		if (accepted_total > 0) {
-			st->goods[cargo_type].status.Set({GoodsEntry::State::EverAccepted, GoodsEntry::State::CurrentMonth, GoodsEntry::State::AcceptedBigtick});
-		}
-
-		/* Update company statistics. */
-		company->cur_economy.delivered_cargo[cargo_type] += accepted_total;
-
-		/* Increase town's counter for town effects. */
-		const CargoSpec *cs = CargoSpec::Get(cargo_type);
-		st->town->received[cs->town_acceptance_effect].new_act += accepted_total;
-		if (accepted_total - accepted_ind > 0) {
-			st->town->GetOrCreateCargoAccepted(cargo_type).history[THIS_MONTH].accepted += accepted_total - accepted_ind;
-		}
-
-		/* Update the cargo monitor. */
-		AddCargoDelivery(cargo_type, company->index, accepted_total - accepted_ind, src, st);
-
-		/* Map cargo label to economy commodity. */
-		uint32_t lbl = cs->label.base();
-		std::string label_str = {
-			static_cast<char>(GB(lbl, 24, 8)),
-			static_cast<char>(GB(lbl, 16, 8)),
-			static_cast<char>(GB(lbl, 8, 8)),
-			static_cast<char>(GB(lbl, 0, 8))
-		};
-		uint8_t commodity = EconomyProtocol::MapCargoToEconomyCommodity(label_str);
-
-		/* Send delivery to economy server if this is a supported commodity. */
-		if (commodity != 0xFF && _economy_connection != nullptr && _economy_connection->IsConnected()) {
-			/* Extract origin coordinates from cargo source. */
-			int32_t ox = 0, oy = 0;
-			if (src.IsValid()) {
-				switch (src.type) {
-					case SourceType::Industry: {
-						TileIndex src_tile = Industry::Get(src.ToIndustryID())->location.tile;
-						ox = static_cast<int32_t>(TileX(src_tile));
-						oy = static_cast<int32_t>(TileY(src_tile));
-						break;
-					}
-					case SourceType::Town: {
-						TileIndex src_tile = Town::Get(src.ToTownID())->xy;
-						ox = static_cast<int32_t>(TileX(src_tile));
-						oy = static_cast<int32_t>(TileY(src_tile));
-						break;
-					}
-					default:
-						break;
-				}
-			}
-
-			/* Destination coordinates from station tile. */
-			int32_t dx = static_cast<int32_t>(TileX(st->xy));
-			int32_t dy = static_cast<int32_t>(TileY(st->xy));
-
-			std::string msg = EconomyProtocol::MakeDeliverCargo(
-				_economy_connection->NextRequestId(),
-				commodity,
-				static_cast<double>(num_pieces),
-				ox, oy, dx, dy,
-				static_cast<uint32_t>(periods_in_transit));
-			_economy_connection->Send(nlohmann::json::parse(msg));
-		}
-
-		/* No local income — the economy server handles money. */
-		return 0;
-	}
-#else
 	Station *st = Station::Get(dest);
 
-	/* Give the goods to the industry. */
+	/* Deliver to industry for visual/gameplay effects. */
 	uint accepted_ind = DeliverGoodsToIndustry(st, cargo_type, num_pieces, src.type == SourceType::Industry ? src.ToIndustryID() : IndustryID::Invalid(), company->index);
-
-	/* If this cargo type is always accepted, accept all */
 	uint accepted_total = HasBit(st->always_accepted, cargo_type) ? num_pieces : accepted_ind;
 
-	/* Update station statistics */
+	/* Update station statistics. */
 	if (accepted_total > 0) {
 		st->goods[cargo_type].status.Set({GoodsEntry::State::EverAccepted, GoodsEntry::State::CurrentMonth, GoodsEntry::State::AcceptedBigtick});
 	}
 
-	/* Update company statistics */
+	/* Update company statistics. */
 	company->cur_economy.delivered_cargo[cargo_type] += accepted_total;
 
-	/* Increase town's counter for town effects */
+	/* Increase town's counter for town effects. */
 	const CargoSpec *cs = CargoSpec::Get(cargo_type);
 	st->town->received[cs->town_acceptance_effect].new_act += accepted_total;
 	if (accepted_total - accepted_ind > 0) {
-		/* Cargo not delivered to an industry must go to the town. */
 		st->town->GetOrCreateCargoAccepted(cargo_type).history[THIS_MONTH].accepted += accepted_total - accepted_ind;
 	}
-
-	/* Determine profit */
-	Money profit = GetTransportedGoodsIncome(accepted_total, distance, periods_in_transit, cargo_type);
 
 	/* Update the cargo monitor. */
 	AddCargoDelivery(cargo_type, company->index, accepted_total - accepted_ind, src, st);
 
-	/* Modify profit if a subsidy is in effect */
-	if (CheckSubsidised(cargo_type, company->index, src, st))  {
-		switch (_settings_game.difficulty.subsidy_multiplier) {
-			case 0:  profit += profit >> 1; break;
-			case 1:  profit *= 2; break;
-			case 2:  profit *= 3; break;
-			default: profit *= 4; break;
+	/* Map cargo label to economy commodity. */
+	uint32_t lbl = cs->label.base();
+	std::string label_str = {
+		static_cast<char>(GB(lbl, 24, 8)),
+		static_cast<char>(GB(lbl, 16, 8)),
+		static_cast<char>(GB(lbl, 8, 8)),
+		static_cast<char>(GB(lbl, 0, 8))
+	};
+	uint8_t commodity = EconomyProtocol::MapCargoToEconomyCommodity(label_str);
+
+	/* Send delivery to economy server if this is a supported commodity. */
+	if (commodity != 0xFF && _economy_connection != nullptr && _economy_connection->IsConnected()) {
+		/* Extract origin coordinates from cargo source. */
+		int32_t ox = 0, oy = 0;
+		if (src.IsValid()) {
+			switch (src.type) {
+				case SourceType::Industry: {
+					TileIndex src_tile = Industry::Get(src.ToIndustryID())->location.tile;
+					ox = static_cast<int32_t>(TileX(src_tile));
+					oy = static_cast<int32_t>(TileY(src_tile));
+					break;
+				}
+				case SourceType::Town: {
+					TileIndex src_tile = Town::Get(src.ToTownID())->xy;
+					ox = static_cast<int32_t>(TileX(src_tile));
+					oy = static_cast<int32_t>(TileY(src_tile));
+					break;
+				}
+				default:
+					break;
+			}
 		}
+
+		/* Destination coordinates from station tile. */
+		int32_t dx = static_cast<int32_t>(TileX(st->xy));
+		int32_t dy = static_cast<int32_t>(TileY(st->xy));
+
+		std::string msg = EconomyProtocol::MakeDeliverCargo(
+			_economy_connection->NextRequestId(),
+			commodity,
+			static_cast<double>(num_pieces),
+			ox, oy, dx, dy,
+			static_cast<uint32_t>(periods_in_transit));
+		_economy_connection->Send(nlohmann::json::parse(msg));
 	}
 
-	return profit;
-#endif /* WITH_ECONOMY_SERVER */
+	/* No local income — the economy server handles money. */
+	return 0;
 }
 
 /**

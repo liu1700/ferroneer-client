@@ -1627,7 +1627,8 @@ void ViewportSign::MarkDirty(ZoomLevel maxzoom) const
  */
 static void EmitGpuSpriteCommand(SpriteID image, PaletteID pal,
 	int virt_x, int virt_y, float z_depth,
-	const DrawPixelInfo *dpi, const Viewport *vp)
+	const DrawPixelInfo *dpi, const Viewport *vp,
+	const SubSprite *sub = nullptr)
 {
 	if (_gpu_command_buffer == nullptr || _sprite_atlas == nullptr) return;
 
@@ -1657,6 +1658,42 @@ static void EmitGpuSpriteCommand(SpriteID image, PaletteID pal,
 	int screen_x = vp->left + UnScaleByZoom(virt_x - vp->virtual_left, zoom) + entry.x_offs;
 	int screen_y = vp->top + UnScaleByZoom(virt_y - vp->virtual_top, zoom) + entry.y_offs;
 
+	/* Set up draw rect and UV coords; SubSprite clipping may narrow these. */
+	float draw_x = static_cast<float>(screen_x);
+	float draw_y = static_cast<float>(screen_y);
+	float draw_w = static_cast<float>(entry.width);
+	float draw_h = static_cast<float>(entry.height);
+	float u0 = entry.u0, v0 = entry.v0, u1 = entry.u1, v1 = entry.v1;
+
+	if (sub != nullptr) {
+		/* SubSprite bounds are in screen pixels, relative to the sprite's
+		 * draw position before x_offs/y_offs (i.e. relative to base_x/base_y).
+		 * The blitter in gfx.cpp multiplies by ZOOM_BASE to get unzoomed sprite
+		 * coords; here we work in screen pixels so use them directly. */
+		int base_x = vp->left + UnScaleByZoom(virt_x - vp->virtual_left, zoom);
+		int base_y = vp->top + UnScaleByZoom(virt_y - vp->virtual_top, zoom);
+
+		float clip_left   = static_cast<float>(std::max(base_x + sub->left,      screen_x));
+		float clip_top    = static_cast<float>(std::max(base_y + sub->top,        screen_y));
+		float clip_right  = static_cast<float>(std::min(base_x + sub->right + 1,  screen_x + static_cast<int>(entry.width)));
+		float clip_bottom = static_cast<float>(std::min(base_y + sub->bottom + 1, screen_y + static_cast<int>(entry.height)));
+
+		if (clip_right <= clip_left || clip_bottom <= clip_top) return;
+
+		/* Remap UV coordinates to the clipped sub-region. */
+		float uv_w = entry.u1 - entry.u0;
+		float uv_h = entry.v1 - entry.v0;
+		u0 = entry.u0 + ((clip_left  - draw_x) / draw_w) * uv_w;
+		v0 = entry.v0 + ((clip_top   - draw_y) / draw_h) * uv_h;
+		u1 = entry.u0 + ((clip_right - draw_x) / draw_w) * uv_w;
+		v1 = entry.v0 + ((clip_bottom - draw_y) / draw_h) * uv_h;
+
+		draw_x = clip_left;
+		draw_y = clip_top;
+		draw_w = clip_right - clip_left;
+		draw_h = clip_bottom - clip_top;
+	}
+
 	/* Determine render mode from palette flags. */
 	uint8_t mode = GPU_SPRITE_NORMAL;
 	uint8_t remap_idx = 0;
@@ -1682,10 +1719,10 @@ static void EmitGpuSpriteCommand(SpriteID image, PaletteID pal,
 	}
 
 	_gpu_command_buffer->Emit(entry.page, GpuSpriteInstance{
-		{static_cast<float>(screen_x), static_cast<float>(screen_y)},
-		{static_cast<float>(entry.width), static_cast<float>(entry.height)},
-		{entry.u0, entry.v0},
-		{entry.u1, entry.v1},
+		{draw_x, draw_y},
+		{draw_w, draw_h},
+		{u0, v0},
+		{u1, v1},
 		z_depth,
 		PackModeRemap(mode, remap_idx, alpha),
 		{tint_r, tint_g, tint_b},
@@ -1702,7 +1739,7 @@ static void ViewportDrawTileSprites(const TileSpriteToDrawVector *tstdv,
 		int idx = 0;
 		for (const TileSpriteToDraw &ts : *tstdv) {
 			float z_depth = 0.999f - 0.499f * (static_cast<float>(idx) / std::max(count, 1));
-			EmitGpuSpriteCommand(ts.image, ts.pal, ts.x, ts.y, z_depth, dpi, vp);
+			EmitGpuSpriteCommand(ts.image, ts.pal, ts.x, ts.y, z_depth, dpi, vp, ts.sub);
 			idx++;
 		}
 		return;
@@ -1850,7 +1887,7 @@ static void ViewportDrawParentSprites(const ParentSpriteToSortVector *psd,
 			float child_z = z_depth - 0.0001f;
 
 			if (ps->image != SPR_EMPTY_BOUNDING_BOX) {
-				EmitGpuSpriteCommand(ps->image, ps->pal, ps->x, ps->y, z_depth, dpi, vp);
+				EmitGpuSpriteCommand(ps->image, ps->pal, ps->x, ps->y, z_depth, dpi, vp, ps->sub);
 			}
 
 			int child_idx = ps->first_child;
@@ -1865,7 +1902,7 @@ static void ViewportDrawParentSprites(const ParentSpriteToSortVector *psd,
 					cx = ps->x + cs->x;
 					cy = ps->y + cs->y;
 				}
-				EmitGpuSpriteCommand(cs->image, cs->pal, cx, cy, child_z, dpi, vp);
+				EmitGpuSpriteCommand(cs->image, cs->pal, cx, cy, child_z, dpi, vp, cs->sub);
 				child_z -= 0.00001f;
 			}
 			idx++;

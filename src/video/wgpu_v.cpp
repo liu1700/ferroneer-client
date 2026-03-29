@@ -160,21 +160,30 @@ static uint ConvertSdlKeycodeIntoMy_Wgpu(SDL_Keycode kc)
 /** WGSL shader for fullscreen blit: vertex produces a large triangle,
  *  fragment samples the CPU-uploaded screen texture. */
 static const char *const kBlitShaderWGSL = R"(
-@vertex fn vs(@builtin(vertex_index) vi: u32) -> @builtin(position) vec4f {
+struct VertexOutput {
+    @builtin(position) position: vec4f,
+    @location(0) uv: vec2f,
+};
+
+@vertex fn vs(@builtin(vertex_index) vi: u32) -> VertexOutput {
+    /* Fullscreen triangle covering clip space. */
     var pos = array<vec2f, 3>(
         vec2f(-1.0, -1.0),
         vec2f( 3.0, -1.0),
         vec2f(-1.0,  3.0),
     );
-    return vec4f(pos[vi], 0.0, 1.0);
+    var out: VertexOutput;
+    out.position = vec4f(pos[vi], 0.0, 1.0);
+    /* Map clip space [-1,1] to UV [0,1] with Y flipped for top-left origin. */
+    out.uv = pos[vi] * vec2f(0.5, -0.5) + vec2f(0.5, 0.5);
+    return out;
 }
 
 @group(0) @binding(0) var screen_tex: texture_2d<f32>;
 @group(0) @binding(1) var screen_sampler: sampler;
 
-@fragment fn fs(@builtin(position) pos: vec4f) -> @location(0) vec4f {
-    let uv = pos.xy / vec2f(textureDimensions(screen_tex));
-    return textureSample(screen_tex, screen_sampler, uv);
+@fragment fn fs(in: VertexOutput) -> @location(0) vec4f {
+    return textureSample(screen_tex, screen_sampler, in.uv);
 }
 )";
 

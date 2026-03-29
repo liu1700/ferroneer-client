@@ -137,6 +137,11 @@ struct TileSpriteToDraw {
 	const SubSprite *sub;           ///< only draw a rectangular part of the sprite
 	int32_t x;                        ///< screen X coordinate of sprite
 	int32_t y;                        ///< screen Y coordinate of sprite
+#ifdef WITH_WGPU
+	int32_t world_x;
+	int32_t world_y;
+	int32_t world_z;
+#endif
 };
 
 struct ChildScreenSpriteToDraw {
@@ -524,6 +529,11 @@ static void AddTileSpriteToDraw(SpriteID image, PaletteID pal, int32_t x, int32_
 	Point pt = RemapCoords(x, y, z);
 	ts.x = pt.x + extra_offs_x;
 	ts.y = pt.y + extra_offs_y;
+#ifdef WITH_WGPU
+	ts.world_x = x;
+	ts.world_y = y;
+	ts.world_z = z;
+#endif
 }
 
 /**
@@ -1621,6 +1631,31 @@ void ViewportSign::MarkDirty(ZoomLevel maxzoom) const
 
 #ifdef WITH_WGPU
 /**
+ * Compute GPU depth from world-space bounding box.
+ * Uses the same metric as the CPU sprite sorter: sum of all bbox coordinates.
+ * Larger sum = closer to camera = smaller depth value (LESS depth test).
+ */
+static float ComputeWorldZDepth(int xmin, int xmax, int ymin, int ymax, int zmin, int zmax)
+{
+	double sum = static_cast<double>(xmin) + xmax + ymin + ymax + zmin + zmax;
+	constexpr double MAX_SUM = 500000.0;
+	double normalized = std::clamp(sum / MAX_SUM, 0.0, 1.0);
+	return static_cast<float>(0.49 - normalized * 0.48 + 0.01);
+}
+
+/**
+ * Compute GPU depth for a tile sprite from its world position.
+ * Tile sprites use range [0.50, 0.99] — behind all parent sprites.
+ */
+static float ComputeTileZDepth(int world_x, int world_y, int world_z)
+{
+	double sum = static_cast<double>(world_x) * 2 + static_cast<double>(world_y) * 2 + world_z * 2;
+	constexpr double MAX_SUM = 500000.0;
+	double normalized = std::clamp(sum / MAX_SUM, 0.0, 1.0);
+	return static_cast<float>(0.99 - normalized * 0.48);
+}
+
+/**
  * Emit a GPU draw command for a single sprite.
  * Converts virtual viewport coordinates to screen pixel coordinates and
  * pushes an instance into the per-page command buffer.
@@ -1735,12 +1770,9 @@ static void ViewportDrawTileSprites(const TileSpriteToDrawVector *tstdv,
 {
 #ifdef WITH_WGPU
 	if (_gpu_command_buffer != nullptr) {
-		int count = static_cast<int>(tstdv->size());
-		int idx = 0;
 		for (const TileSpriteToDraw &ts : *tstdv) {
-			float z_depth = 0.999f - 0.499f * (static_cast<float>(idx) / std::max(count, 1));
+			float z_depth = ComputeTileZDepth(ts.world_x, ts.world_y, ts.world_z);
 			EmitGpuSpriteCommand(ts.image, ts.pal, ts.x, ts.y, z_depth, dpi, vp, ts.sub);
-			idx++;
 		}
 		return;
 	}
@@ -1880,10 +1912,8 @@ static void ViewportDrawParentSprites(const ParentSpriteToSortVector *psd,
 {
 #ifdef WITH_WGPU
 	if (_gpu_command_buffer != nullptr) {
-		int sorted_count = static_cast<int>(psd->size());
-		int idx = 0;
 		for (const ParentSpriteToDraw *ps : *psd) {
-			float z_depth = 0.499f - 0.498f * (static_cast<float>(idx) / std::max(sorted_count, 1));
+			float z_depth = ComputeWorldZDepth(ps->xmin, ps->xmax, ps->ymin, ps->ymax, ps->zmin, ps->zmax);
 			float child_z = z_depth - 0.0001f;
 
 			if (ps->image != SPR_EMPTY_BOUNDING_BOX) {
@@ -1894,18 +1924,11 @@ static void ViewportDrawParentSprites(const ParentSpriteToSortVector *psd,
 			while (child_idx >= 0) {
 				const ChildScreenSpriteToDraw *cs = &(*csstdv)[child_idx];
 				child_idx = cs->next;
-				int cx, cy;
-				if (cs->relative) {
-					cx = ps->left + cs->x;
-					cy = ps->top + cs->y;
-				} else {
-					cx = ps->x + cs->x;
-					cy = ps->y + cs->y;
-				}
+				int cx = cs->relative ? ps->left + cs->x : ps->x + cs->x;
+				int cy = cs->relative ? ps->top + cs->y : ps->y + cs->y;
 				EmitGpuSpriteCommand(cs->image, cs->pal, cx, cy, child_z, dpi, vp, cs->sub);
 				child_z -= 0.00001f;
 			}
-			idx++;
 		}
 		return;
 	}
@@ -2036,7 +2059,12 @@ void ViewportDoDraw(const Viewport &vp, int left, int top, int right, int bottom
 		_vd.parent_sprites_to_sort.push_back(&psd);
 	}
 
-	_vp_sprite_sorter(&_vd.parent_sprites_to_sort);
+#ifdef WITH_WGPU
+	if (_gpu_command_buffer == nullptr)
+#endif
+	{
+		_vp_sprite_sorter(&_vd.parent_sprites_to_sort);
+	}
 	ViewportDrawParentSprites(&_vd.parent_sprites_to_sort, &_vd.child_screen_sprites_to_draw, &_vd.dpi, &vp);
 
 	if (_draw_bounding_boxes) ViewportDrawBoundingBoxes(&_vd.parent_sprites_to_sort);

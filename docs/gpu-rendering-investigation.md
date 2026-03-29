@@ -2,7 +2,7 @@
 
 **Branch:** `phase3/gpu-visual-fixes`
 **Date:** 2026-03-29
-**Status:** Partially fixed, core visual corruption remains
+**Status:** Partially fixed, **root cause identified: atlas pixel alpha=0 for opaque sprites**
 
 ---
 
@@ -91,34 +91,66 @@ The corruption pattern after Fix 1 (and presumably Fix 2):
 | Duplicate emission | Fixed | Single-pass viewport rendering |
 | Sprite cache pre-atlas | Fixed | GfxClearSpriteCache on first frame |
 
-## Hypotheses for Remaining Bug
+## CONFIRMED Root Cause: Atlas Pixel Alpha = 0
 
-### H1: Atlas texture data has wrong alpha for ground tiles
-Ground tile sprites might be uploaded with alpha=0 in their RGBA data, causing the fragment shader to `discard` them. This could happen if:
-- The palette-to-RGB conversion produces wrong alpha for 8bpp sprites
-- The upscaled ZoomLevel::Min data has alpha artifacts from `ResizeSpriteIn()`
+**Tested by replacing `discard` with magenta in the fragment shader.** Result: massive magenta areas exactly where dark gaps were. This proves sprites ARE emitted with correct positions and UVs, but the atlas RGBA texture data has `alpha=0` for pixels that should be opaque.
 
-**How to test:** Dump a few tile sprite atlas entries' pixel data, or add a debug mode that forces alpha=1.0 in the fragment shader.
+### The bug is in the RGBA conversion during atlas upload (`spritecache.cpp:539-575`):
 
-### H2: Coordinate transform places tiles off-screen
-The `UnScaleByZoom(entry.x_offs/y_offs, zoom)` transform might produce wrong screen positions for tile sprites specifically. Ground tiles use large negative offsets (e.g., -124, -64 at ZoomLevel::Min).
+```cpp
+const SpriteLoader::Sprite &src = sprite.Root();  // sprite[ZoomLevel::Min]
+// ...
+for (uint32_t i = 0; i < pixel_count; i++) {
+    const SpriteLoader::CommonPixel &px = src.data[i];
+    // ... RGB conversion ...
+    rgba[i * 4 + 3] = px.a;    // <-- THIS IS 0 FOR MANY OPAQUE PIXELS
+    m_data[i] = px.m;
+}
+```
 
-**How to test:** Log screen_x/screen_y for tile sprites and verify they're within viewport bounds.
+`px.a` (the alpha channel of `sprite[ZoomLevel::Min]`) is 0 for pixels that should be opaque.
 
-### H3: Z-depth conflict between tile sprites and invisible parent children
-Some parent sprites use `SPR_EMPTY_BOUNDING_BOX` (invisible parent) with child sprites. These children get z_depth in the parent range (0.001-0.499), which wins the depth test over tiles (0.5-0.999). If children have partially transparent pixels (alpha > 0.01 but visually invisible), they'd block tiles.
+### Most likely sub-causes (investigate in this order):
 
-**How to test:** Temporarily disable parent sprite rendering and see if tiles appear.
+**1. `ResizeSpriteIn()` doesn't preserve alpha during upscale to ZoomLevel::Min**
+Most base graphics are provided at ZoomLevel::Normal. `ResizeSprites()` calls `ResizeSpriteIn()` to upscale to ZoomLevel::Min. If the upscaling copies RGB but doesn't copy alpha, the Min-level data would have `a=0` everywhere.
 
-### H4: ViewportAddLandscape coverage differs in single-pass mode
-The single-pass `ViewportDoDraw()` with full viewport bounds might set up `_vd.dpi` differently than the dirty-block path, causing `ViewportAddLandscape()` to miss some tiles. The title screen has 5 viewport windows; some might overlap and interfere.
+Where to look: `src/spritecache.cpp` — the `ResizeSpriteIn()` function. Check if it copies `CommonPixel.a` from source pixels.
 
-**How to test:** Compare tile collection counts between Phase 1 (single-pass) and the original dirty-block path.
+**2. Sprite loader doesn't set alpha for 8bpp sprites at certain zoom levels**
+For 8bpp (palette-only) sprites, the GRF loader might not set `px.a = 255` for opaque pixels at all zoom levels. The alpha might only be set for the natively-provided zoom level.
 
-### H5: Sprite atlas UV precision or texture upload alignment
-The `wgpuQueueWriteTexture` row alignment (256 bytes) might cause pixel data to be offset within the atlas page, making UVs point to slightly wrong regions. For small sprites this could mean sampling transparent padding.
+Where to look: `src/spriteloader/grf.cpp` — check how `CommonPixel.a` is initialized for each zoom level.
 
-**How to test:** Add 1-pixel border validation around atlas entries, or dump atlas pages as PNG for visual inspection.
+**3. `PadSprites()` pads with zero-alpha pixels that overlap the visible sprite area**
+PadSprites adjusts sprite dimensions for zoom-level alignment. If the padding is done by allocating a new buffer zeroed to 0 and copying pixel data with wrong offsets, the visible area could be overwritten with zeros.
+
+Where to look: `src/spritecache.cpp` — `PadSprites()` function, specifically buffer allocation and copy logic.
+
+### Quickest fix to try
+
+In the atlas upload code (`spritecache.cpp:539-575`), temporarily force alpha=255 for opaque pixels and check if rendering becomes correct:
+
+```cpp
+// After the pixel conversion loop, force alpha for pixels with non-zero palette index:
+for (uint32_t i = 0; i < pixel_count; i++) {
+    if (m_data[i] != 0 && rgba[i * 4 + 3] == 0) {
+        rgba[i * 4 + 3] = 255;  // Force opaque for palette-indexed pixels
+    }
+}
+```
+
+If this fixes rendering, the root cause is confirmed as alpha not being set for opaque pixels at ZoomLevel::Min. Then trace backwards to find WHERE alpha should have been set.
+
+### Other hypotheses (ruled out)
+
+| Hypothesis | Status | Evidence |
+|-----------|--------|----------|
+| H1: Wrong alpha in atlas | **CONFIRMED** | Magenta shader test |
+| H2: Wrong coordinates | Ruled out | Magenta shows sprites at correct positions |
+| H3: Depth buffer conflict | Ruled out | Magenta shows tiles ARE rendered, just transparent |
+| H4: Tile collection differs | Ruled out | Frame 1 diagnostic: 552/552 tiles valid |
+| H5: UV precision | Ruled out | Magenta covers entire sprite areas, not edges |
 
 ## Key Files
 

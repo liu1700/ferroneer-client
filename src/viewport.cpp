@@ -1659,14 +1659,33 @@ static void EmitGpuSpriteCommand(SpriteID image, PaletteID pal,
 		remap_idx = pal & 0xFF;
 	}
 
+	/* Determine tint colour and alpha for building preview / tile selection palettes. */
+	float tint_r = 1.0f, tint_g = 1.0f, tint_b = 1.0f;
+	uint8_t alpha = 255;
+
+	PaletteID pal_stripped = pal & ~(PALETTE_MODIFIER_TRANSPARENT | PALETTE_MODIFIER_COLOUR);
+	if (pal_stripped == PALETTE_SEL_TILE_RED || pal_stripped == PALETTE_TO_STRUCT_RED) {
+		/* Invalid placement — red ghost. */
+		tint_r = 1.0f; tint_g = 0.5f; tint_b = 0.5f;
+		alpha = 180;
+	} else if (pal_stripped == PALETTE_SEL_TILE_BLUE || pal_stripped == PALETTE_TO_STRUCT_BLUE) {
+		/* Valid placement / catchment area — green/blue ghost. */
+		tint_r = 0.5f; tint_g = 1.0f; tint_b = 0.5f;
+		alpha = 180;
+	} else if (pal_stripped == PALETTE_TO_STRUCT_GREEN) {
+		/* Valid placement green (e.g. bridge) — green ghost. */
+		tint_r = 0.5f; tint_g = 1.0f; tint_b = 0.5f;
+		alpha = 180;
+	}
+
 	_gpu_command_buffer->Emit(entry.page, GpuSpriteInstance{
 		{static_cast<float>(screen_x), static_cast<float>(screen_y)},
 		{static_cast<float>(entry.width), static_cast<float>(entry.height)},
 		{entry.u0, entry.v0},
 		{entry.u1, entry.v1},
 		z_depth,
-		PackModeRemap(mode, remap_idx, 255),
-		{1.0f, 1.0f, 1.0f},
+		PackModeRemap(mode, remap_idx, alpha),
+		{tint_r, tint_g, tint_b},
 	});
 }
 #endif

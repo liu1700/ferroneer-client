@@ -1656,6 +1656,7 @@ static void EmitGpuSpriteCommand(SpriteID image, PaletteID pal,
 	const SubSprite *sub = nullptr)
 {
 	if (_gpu_command_buffer == nullptr || _sprite_atlas == nullptr) return;
+	if (_gpu_suppress_sprite_emit) return;
 
 	SpriteID sprite_id = image & SPRITE_MASK;
 

@@ -12,9 +12,12 @@
 
 #include "sprite_command.h"
 
+#include "../debug.h"
+
 #include "../safeguards.h"
 
 SpriteCommandBuffer *_gpu_command_buffer = nullptr;
+bool _gpu_suppress_sprite_emit = false;
 
 void SpriteCommandBuffer::Reset()
 {
@@ -23,7 +26,15 @@ void SpriteCommandBuffer::Reset()
 
 void SpriteCommandBuffer::Emit(uint16_t atlas_page, const GpuSpriteInstance &instance)
 {
-	if (atlas_page >= MAX_ATLAS_PAGES) return;
+	if (atlas_page >= MAX_ATLAS_PAGES) {
+		static uint32_t dropped_page_logs = 0;
+		if (dropped_page_logs < 16) {
+			Debug(driver, 0, "[gpu] dropping sprite on atlas page {} (MAX_ATLAS_PAGES={})",
+				atlas_page, static_cast<uint32_t>(MAX_ATLAS_PAGES));
+			dropped_page_logs++;
+		}
+		return;
+	}
 	this->batches[atlas_page].instances.push_back(instance);
 }
 

@@ -20,8 +20,11 @@
 #include "../fileio_func.h"
 #include "../framerate_type.h"
 #include "../window_func.h"
+#include "../viewport_func.h"
+#include "../window_gui.h"
 #include "wgpu_v.h"
 #include "../gpu/sprite_atlas.h"
+#include "../gpu/sprite_command.h"
 #include <SDL.h>
 #ifdef __APPLE__
 #	include <SDL_metal.h>
@@ -718,17 +721,46 @@ void VideoDriver_Wgpu::Paint()
 {
 	PerformanceMeasurer framerate(PFE_VIDEO);
 
+	this->command_buffer.Reset();
+	std::fill(this->video_buffer.begin(), this->video_buffer.end(), 0);
+
 #ifdef WITH_WGPU
 	static uint32_t gpu_frame_counter = 0;
 	GpuDiagResetFrame();
+
+	/* Phase 1 — GPU sprites: draw each viewport in a single pass so every
+	 * sprite is collected once, sorted once, and emitted once with a
+	 * globally consistent z_depth.  This eliminates per-dirty-block
+	 * duplicate emissions that caused z_depth chaos. */
+	if (_gpu_command_buffer != nullptr) {
+		/* ViewportDoDraw reads _cur_dpi for pitch and dst_ptr.
+		 * Outside DrawDirtyBlocks it may be stale, so point it at _screen. */
+		_cur_dpi = &_screen;
+		for (const Window *w : Window::Iterate()) {
+			if (w->viewport == nullptr) continue;
+			const Viewport &vp = *w->viewport;
+			ViewportDoDraw(vp,
+				vp.virtual_left,
+				vp.virtual_top,
+				vp.virtual_left + vp.virtual_width,
+				vp.virtual_top + vp.virtual_height);
+		}
+	}
+
+	/* Phase 2 — CPU UI: suppress GPU sprite emission so DrawDirtyBlocks
+	 * only produces CPU-rendered content (signs, text, overlays, UI).
+	 * ViewportDrawTileSprites/ViewportDrawParentSprites still take the
+	 * GPU branch (checking _gpu_command_buffer != nullptr) and return
+	 * early, so viewport content is NOT drawn to the CPU buffer — the
+	 * GPU handles it from Phase 1. */
+	_gpu_suppress_sprite_emit = true;
 #endif
 
-	this->command_buffer.Reset();
-	std::fill(this->video_buffer.begin(), this->video_buffer.end(), 0);
 	MarkWholeScreenDirty();
 	DrawDirtyBlocks();
 
 #ifdef WITH_WGPU
+	_gpu_suppress_sprite_emit = false;
 	GpuDiagLogFrame(gpu_frame_counter++);
 #endif
 

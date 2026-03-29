@@ -28,6 +28,14 @@ if(NOT OPTION_DEDICATED)
     )
 
     add_files(
+        wgpu_v.cpp
+        wgpu_v.h
+        wgpu_default_v.cpp
+        wgpu_default_v.h
+        CONDITION WGPU_FOUND AND SDL2_FOUND
+    )
+
+    add_files(
         win32_v.cpp
         win32_v.h
         CONDITION WIN32

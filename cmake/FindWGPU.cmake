@@ -7,8 +7,9 @@ find_path(WGPU_INCLUDE_DIR
     NO_DEFAULT_PATH
 )
 
+# Prefer static library to avoid runtime dylib path issues.
 find_library(WGPU_LIBRARY
-    NAMES wgpu_native
+    NAMES libwgpu_native.a wgpu_native
     PATHS "${WGPU_ROOT}/lib"
     NO_DEFAULT_PATH
 )

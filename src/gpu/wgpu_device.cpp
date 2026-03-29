@@ -70,9 +70,8 @@ bool WgpuDevice::Init(void *native_layer, int width, int height)
 		result->done = true;
 	};
 
-	WGPUFutureWaitInfo wait_info{};
-	wait_info.future = wgpuInstanceRequestAdapter(this->instance, &adapter_opts, adapter_cb);
-	wgpuInstanceWaitAny(this->instance, 1, &wait_info, UINT64_MAX);
+	/* wgpu-native fires the callback synchronously with AllowSpontaneous. */
+	wgpuInstanceRequestAdapter(this->instance, &adapter_opts, adapter_cb);
 
 	if (adapter_result.adapter == nullptr) {
 		fprintf(stderr, "[wgpu] No suitable adapter found\n");
@@ -106,9 +105,8 @@ bool WgpuDevice::Init(void *native_layer, int width, int height)
 		result->done = true;
 	};
 
-	WGPUFutureWaitInfo device_wait{};
-	device_wait.future = wgpuAdapterRequestDevice(this->adapter, &device_desc, device_cb);
-	wgpuInstanceWaitAny(this->instance, 1, &device_wait, UINT64_MAX);
+	/* wgpu-native fires the callback synchronously with AllowSpontaneous. */
+	wgpuAdapterRequestDevice(this->adapter, &device_desc, device_cb);
 
 	if (device_result.device == nullptr) {
 		fprintf(stderr, "[wgpu] Failed to create WGPUDevice\n");

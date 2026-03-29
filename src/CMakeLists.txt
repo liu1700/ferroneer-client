@@ -8,6 +8,7 @@ endif()
 
 add_subdirectory(3rdparty)
 add_subdirectory(ai)
+add_subdirectory(gpu)
 add_subdirectory(blitter)
 add_subdirectory(core)
 add_subdirectory(fontcache)

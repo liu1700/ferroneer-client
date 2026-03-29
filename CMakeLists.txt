@@ -160,6 +160,10 @@ endif()
 
 find_package(ixwebsocket CONFIG REQUIRED)
 find_package(nlohmann_json CONFIG REQUIRED)
+find_package(WGPU)
+if(WGPU_FOUND)
+    message(STATUS "wgpu-native found: ${WGPU_LIBRARIES}")
+endif()
 if(APPLE)
     enable_language(OBJCXX)
 
@@ -346,6 +350,9 @@ if(NOT OPTION_DEDICATED)
 endif()
 
 target_link_libraries(openttd_lib ixwebsocket::ixwebsocket nlohmann_json::nlohmann_json)
+if(WGPU_FOUND)
+    target_link_libraries(openttd_lib wgpu::wgpu)
+endif()
 
 include(3rdparty/llvm/CheckAtomic)
 

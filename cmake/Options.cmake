@@ -135,4 +135,8 @@ function(add_definitions_based_on_options)
     if(OPTION_ALLOW_INVALID_SIGNATURE)
         add_definitions(-DALLOW_INVALID_SIGNATURE)
     endif()
+
+    if(WGPU_FOUND)
+        add_definitions(-DWITH_WGPU)
+    endif()
 endfunction()

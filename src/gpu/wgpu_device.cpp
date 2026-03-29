@@ -12,6 +12,36 @@
 
 #include <cstdio>
 
+static std::string_view WGPUStringViewToStringView(WGPUStringView view)
+{
+	if (view.data == nullptr) return {};
+	if (view.length == WGPU_STRLEN) return view.data;
+	return std::string_view(view.data, view.length);
+}
+
+static bool ContainsTextureFormat(const WGPUSurfaceCapabilities &capabilities, WGPUTextureFormat format)
+{
+	for (size_t i = 0; i < capabilities.formatCount; i++) {
+		if (capabilities.formats[i] == format) return true;
+	}
+	return false;
+}
+
+static bool ContainsPresentMode(const WGPUSurfaceCapabilities &capabilities, WGPUPresentMode mode)
+{
+	for (size_t i = 0; i < capabilities.presentModeCount; i++) {
+		if (capabilities.presentModes[i] == mode) return true;
+	}
+	return false;
+}
+
+static bool ContainsAlphaMode(const WGPUSurfaceCapabilities &capabilities, WGPUCompositeAlphaMode mode)
+{
+	for (size_t i = 0; i < capabilities.alphaModeCount; i++) {
+		if (capabilities.alphaModes[i] == mode) return true;
+	}
+	return false;
+}
 
 WgpuDevice *_wgpu_device = nullptr;
 
@@ -87,7 +117,26 @@ bool WgpuDevice::Init(void *native_layer, int width, int height)
 
 	WGPUDeviceDescriptor device_desc{};
 	device_desc.nextInChain = nullptr;
+	device_desc.label = {.data = "openttd_wgpu_device", .length = WGPU_STRLEN};
 	/* Leave limits/features at defaults (request nothing extra). */
+	device_desc.defaultQueue.label = {.data = "openttd_wgpu_queue", .length = WGPU_STRLEN};
+	device_desc.deviceLostCallbackInfo = {
+		.nextInChain = nullptr,
+		.mode = WGPUCallbackMode_AllowSpontaneous,
+		.callback = [](WGPUDevice const * /*device*/, WGPUDeviceLostReason reason, WGPUStringView message, void * /*userdata1*/, void * /*userdata2*/) {
+			fprintf(stderr, "[wgpu] Device lost (reason=%d): %.*s\n", static_cast<int>(reason), static_cast<int>(WGPUStringViewToStringView(message).size()), WGPUStringViewToStringView(message).data());
+		},
+		.userdata1 = nullptr,
+		.userdata2 = nullptr,
+	};
+	device_desc.uncapturedErrorCallbackInfo = {
+		.nextInChain = nullptr,
+		.callback = [](WGPUDevice const * /*device*/, WGPUErrorType type, WGPUStringView message, void * /*userdata1*/, void * /*userdata2*/) {
+			fprintf(stderr, "[wgpu] Uncaptured error (type=%d): %.*s\n", static_cast<int>(type), static_cast<int>(WGPUStringViewToStringView(message).size()), WGPUStringViewToStringView(message).data());
+		},
+		.userdata1 = nullptr,
+		.userdata2 = nullptr,
+	};
 
 	WGPURequestDeviceCallbackInfo device_cb{};
 	device_cb.nextInChain = nullptr;
@@ -121,19 +170,8 @@ bool WgpuDevice::Init(void *native_layer, int width, int height)
 		return false;
 	}
 
-	/* Configure surface. */
-	WGPUSurfaceConfiguration surf_cfg{};
-	surf_cfg.nextInChain = nullptr;
-	surf_cfg.device = this->device;
-	surf_cfg.format = this->surface_format;
-	surf_cfg.usage = WGPUTextureUsage_RenderAttachment;
-	surf_cfg.width = static_cast<uint32_t>(width);
-	surf_cfg.height = static_cast<uint32_t>(height);
-	surf_cfg.viewFormatCount = 0;
-	surf_cfg.viewFormats = nullptr;
-	surf_cfg.alphaMode = WGPUCompositeAlphaMode_Auto;
-	surf_cfg.presentMode = WGPUPresentMode_Fifo;
-	wgpuSurfaceConfigure(this->surface, &surf_cfg);
+	if (!this->SelectSurfaceConfiguration()) return false;
+	if (!this->ReconfigureSurface()) return false;
 
 	fprintf(stdout, "[wgpu] Device initialised (%dx%d)\n", width, height);
 	return true;
@@ -144,23 +182,58 @@ void WgpuDevice::Resize(int width, int height)
 	if (this->device == nullptr || this->surface == nullptr) return;
 	this->width = width;
 	this->height = height;
+	this->ReconfigureSurface();
+}
+
+bool WgpuDevice::ReconfigureSurface()
+{
+	if (this->device == nullptr || this->surface == nullptr) return false;
+	if (this->width <= 0 || this->height <= 0) return false;
 
 	WGPUSurfaceConfiguration surf_cfg{};
 	surf_cfg.nextInChain = nullptr;
 	surf_cfg.device = this->device;
 	surf_cfg.format = this->surface_format;
 	surf_cfg.usage = WGPUTextureUsage_RenderAttachment;
-	surf_cfg.width = static_cast<uint32_t>(width);
-	surf_cfg.height = static_cast<uint32_t>(height);
+	surf_cfg.width = static_cast<uint32_t>(this->width);
+	surf_cfg.height = static_cast<uint32_t>(this->height);
 	surf_cfg.viewFormatCount = 0;
 	surf_cfg.viewFormats = nullptr;
-	surf_cfg.alphaMode = WGPUCompositeAlphaMode_Auto;
-	surf_cfg.presentMode = WGPUPresentMode_Fifo;
+	surf_cfg.alphaMode = this->alpha_mode;
+	surf_cfg.presentMode = this->present_mode;
 	wgpuSurfaceConfigure(this->surface, &surf_cfg);
+	return true;
+}
+
+bool WgpuDevice::SelectSurfaceConfiguration()
+{
+	WGPUSurfaceCapabilities capabilities{};
+	if (wgpuSurfaceGetCapabilities(this->surface, this->adapter, &capabilities) != WGPUStatus_Success) {
+		fprintf(stderr, "[wgpu] Failed to query surface capabilities\n");
+		return false;
+	}
+
+	if (capabilities.formatCount == 0 || capabilities.presentModeCount == 0 || capabilities.alphaModeCount == 0) {
+		fprintf(stderr, "[wgpu] Surface capabilities are incomplete\n");
+		wgpuSurfaceCapabilitiesFreeMembers(capabilities);
+		return false;
+	}
+
+	this->surface_format = ContainsTextureFormat(capabilities, WGPUTextureFormat_BGRA8Unorm) ? WGPUTextureFormat_BGRA8Unorm : capabilities.formats[0];
+	this->present_mode = ContainsPresentMode(capabilities, WGPUPresentMode_Fifo) ? WGPUPresentMode_Fifo : capabilities.presentModes[0];
+	this->alpha_mode = ContainsAlphaMode(capabilities, WGPUCompositeAlphaMode_Opaque) ? WGPUCompositeAlphaMode_Opaque : capabilities.alphaModes[0];
+
+	fprintf(stdout, "[wgpu] Surface configured with format=%d presentMode=%d alphaMode=%d\n",
+		static_cast<int>(this->surface_format), static_cast<int>(this->present_mode), static_cast<int>(this->alpha_mode));
+	wgpuSurfaceCapabilitiesFreeMembers(capabilities);
+	return true;
 }
 
 void WgpuDevice::Shutdown()
 {
+	if (this->surface != nullptr) {
+		wgpuSurfaceUnconfigure(this->surface);
+	}
 	if (this->queue != nullptr) {
 		wgpuQueueRelease(this->queue);
 		this->queue = nullptr;

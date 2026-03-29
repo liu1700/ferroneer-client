@@ -25,6 +25,7 @@ public:
 	bool Init(void *native_layer, int width, int height);
 	void Resize(int width, int height);
 	void Shutdown();
+	bool ReconfigureSurface();
 
 	bool IsReady() const { return this->device != nullptr; }
 
@@ -32,6 +33,8 @@ public:
 	WGPUQueue GetQueue() const { return this->queue; }
 	WGPUSurface GetSurface() const { return this->surface; }
 	WGPUTextureFormat GetSurfaceFormat() const { return this->surface_format; }
+	WGPUCompositeAlphaMode GetAlphaMode() const { return this->alpha_mode; }
+	WGPUPresentMode GetPresentMode() const { return this->present_mode; }
 	int GetWidth() const { return this->width; }
 	int GetHeight() const { return this->height; }
 
@@ -42,10 +45,13 @@ private:
 	WGPUQueue queue = nullptr;
 	WGPUSurface surface = nullptr;
 	WGPUTextureFormat surface_format = WGPUTextureFormat_BGRA8Unorm;
+	WGPUCompositeAlphaMode alpha_mode = WGPUCompositeAlphaMode_Opaque;
+	WGPUPresentMode present_mode = WGPUPresentMode_Fifo;
 	int width = 0;
 	int height = 0;
 
 	WGPUSurface CreateSurfaceFromNativeLayer(void *native_layer);
+	bool SelectSurfaceConfiguration();
 };
 
 extern WgpuDevice *_wgpu_device;

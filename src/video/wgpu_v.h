@@ -47,9 +47,10 @@ protected:
 	bool PollEvent() override;
 
 private:
-	void Paint();
+	void Paint() override;
 	void RenderFrame();
 	void ResizeWindow(int w, int h);
+	void GetDrawableSize(int &w, int &h) const;
 
 	SDL_Window *sdl_window = nullptr;         ///< SDL2 window handle.
 	void *metal_view = nullptr;               ///< SDL_MetalView (macOS only).
@@ -60,6 +61,16 @@ private:
 	std::string driver_info;                  ///< Human-readable driver info string.
 
 	bool edit_box_focused = false;            ///< Whether SDL text input mode is active.
+
+	/* GPU resources for framebuffer blit. */
+	WGPUTexture screen_texture = nullptr;     ///< Intermediate texture for CPU framebuffer upload.
+	WGPURenderPipeline blit_pipeline = nullptr; ///< Fullscreen quad pipeline.
+	WGPUBindGroup blit_bind_group = nullptr;  ///< Texture + sampler bind group.
+	WGPUSampler blit_sampler = nullptr;       ///< Nearest-neighbour sampler.
+	WGPUBindGroupLayout blit_bgl = nullptr;   ///< Bind group layout.
+
+	void CreateBlitResources(int w, int h);
+	void DestroyBlitResources();
 };
 
 #endif /* WITH_WGPU */

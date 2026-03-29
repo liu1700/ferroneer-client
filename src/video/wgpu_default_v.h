@@ -18,7 +18,9 @@
 /** Factory for the wgpu video driver. */
 class FVideoDriver_Wgpu : public DriverFactoryBase {
 public:
-	FVideoDriver_Wgpu() : DriverFactoryBase(Driver::Type::Video, 10, "wgpu", "wgpu GPU-accelerated Video Driver") {}
+	/* Keep wgpu available for explicit opt-in, but avoid auto-probing it ahead of the
+	 * mature macOS backends until surface/present handling is production ready. */
+	FVideoDriver_Wgpu() : DriverFactoryBase(Driver::Type::Video, 7, "wgpu", "wgpu GPU-accelerated Video Driver") {}
 	std::unique_ptr<Driver> CreateInstance() const override { return std::make_unique<VideoDriver_Wgpu>(); }
 };
 

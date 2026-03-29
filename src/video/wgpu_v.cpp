@@ -194,6 +194,7 @@ void VideoDriver_Wgpu::CreateBlitResources(int w, int h)
 	tex_desc.viewFormatCount = 0;
 	tex_desc.viewFormats = nullptr;
 	this->screen_texture = wgpuDeviceCreateTexture(device, &tex_desc);
+	Debug(driver, 0, "[wgpu] screen_texture={}", (void *)this->screen_texture);
 
 	/* 2. Nearest-neighbour sampler — pixel-perfect blit. */
 	WGPUSamplerDescriptor samp_desc{};
@@ -210,6 +211,7 @@ void VideoDriver_Wgpu::CreateBlitResources(int w, int h)
 	samp_desc.compare = WGPUCompareFunction_Undefined;
 	samp_desc.maxAnisotropy = 1;
 	this->blit_sampler = wgpuDeviceCreateSampler(device, &samp_desc);
+	Debug(driver, 0, "[wgpu] sampler={}", (void *)this->blit_sampler);
 
 	/* 3. Compile WGSL shader module. */
 	WGPUShaderSourceWGSL wgsl_src{};
@@ -222,6 +224,7 @@ void VideoDriver_Wgpu::CreateBlitResources(int w, int h)
 	sm_desc.label = {.data = "blit_shader", .length = WGPU_STRLEN};
 
 	WGPUShaderModule shader = wgpuDeviceCreateShaderModule(device, &sm_desc);
+	Debug(driver, 0, "[wgpu] shader={}", (void *)shader);
 
 	/* 4. Bind group layout: texture_2d<f32> + sampler (fragment-only). */
 	WGPUBindGroupLayoutEntry bgl_entries[2]{};
@@ -253,6 +256,7 @@ void VideoDriver_Wgpu::CreateBlitResources(int w, int h)
 	bgl_desc.entryCount = 2;
 	bgl_desc.entries = bgl_entries;
 	this->blit_bgl = wgpuDeviceCreateBindGroupLayout(device, &bgl_desc);
+	Debug(driver, 0, "[wgpu] bgl={}", (void *)this->blit_bgl);
 
 	/* 5. Pipeline layout from blit_bgl. */
 	WGPUPipelineLayoutDescriptor pl_desc{};
@@ -308,6 +312,7 @@ void VideoDriver_Wgpu::CreateBlitResources(int w, int h)
 	rp_desc.fragment = &frag_state;
 
 	this->blit_pipeline = wgpuDeviceCreateRenderPipeline(device, &rp_desc);
+	Debug(driver, 0, "[wgpu] pipeline={}", (void *)this->blit_pipeline);
 
 	/* Pipeline layout is now owned by the pipeline — release our ref. */
 	wgpuPipelineLayoutRelease(pipeline_layout);
@@ -352,9 +357,21 @@ void VideoDriver_Wgpu::CreateBlitResources(int w, int h)
 	bg_desc.entryCount = 2;
 	bg_desc.entries = bg_entries;
 	this->blit_bind_group = wgpuDeviceCreateBindGroup(device, &bg_desc);
+	Debug(driver, 0, "[wgpu] bind_group={}", (void *)this->blit_bind_group);
 
 	/* Texture view is now owned by the bind group — release our ref. */
 	wgpuTextureViewRelease(tex_view);
+}
+
+void VideoDriver_Wgpu::GetDrawableSize(int &w, int &h) const
+{
+#ifdef __APPLE__
+	SDL_Metal_GetDrawableSize(this->sdl_window, &w, &h);
+#else
+	SDL_GL_GetDrawableSize(this->sdl_window, &w, &h);
+#endif
+	if (w < 64) w = 64;
+	if (h < 64) h = 64;
 }
 
 void VideoDriver_Wgpu::DestroyBlitResources()
@@ -396,7 +413,7 @@ std::optional<std::string_view> VideoDriver_Wgpu::Start(const StringList &param)
 	uint h = _cur_resolution.height;
 
 	/* Create the SDL2 window with Metal support on macOS. */
-	uint32_t flags = SDL_WINDOW_SHOWN | SDL_WINDOW_RESIZABLE | SDL_WINDOW_ALLOW_HIGHDPI;
+	uint32_t flags = SDL_WINDOW_SHOWN | SDL_WINDOW_RESIZABLE;
 #ifdef __APPLE__
 	flags |= SDL_WINDOW_METAL;
 #endif
@@ -509,13 +526,40 @@ void VideoDriver_Wgpu::RenderFrame()
 	WGPUSurface surface = this->gpu_device.GetSurface();
 
 	/* 1. Acquire next surface texture. */
-	WGPUSurfaceTexture surface_texture;
+	WGPUSurfaceTexture surface_texture{};
 	wgpuSurfaceGetCurrentTexture(surface, &surface_texture);
-	if (surface_texture.status != WGPUSurfaceGetCurrentTextureStatus_SuccessOptimal &&
-		surface_texture.status != WGPUSurfaceGetCurrentTextureStatus_SuccessSuboptimal) return;
+	switch (surface_texture.status) {
+		case WGPUSurfaceGetCurrentTextureStatus_SuccessOptimal:
+			break;
 
-	int w = this->gpu_device.GetWidth();
-	int h = this->gpu_device.GetHeight();
+		case WGPUSurfaceGetCurrentTextureStatus_SuccessSuboptimal:
+			Debug(driver, 1, "[wgpu] Surface became suboptimal, reconfiguring");
+			this->gpu_device.ReconfigureSurface();
+			break;
+
+		case WGPUSurfaceGetCurrentTextureStatus_Timeout:
+			Debug(driver, 1, "[wgpu] Surface acquire timed out");
+			return;
+
+		case WGPUSurfaceGetCurrentTextureStatus_Outdated:
+		case WGPUSurfaceGetCurrentTextureStatus_Lost: {
+			int w, h;
+			this->GetDrawableSize(w, h);
+			Debug(driver, 1, "[wgpu] Surface acquire requires reconfigure, resizing to {}x{}", w, h);
+			this->gpu_device.Resize(w, h);
+			return;
+		}
+
+		case WGPUSurfaceGetCurrentTextureStatus_OutOfMemory:
+		case WGPUSurfaceGetCurrentTextureStatus_DeviceLost:
+		case WGPUSurfaceGetCurrentTextureStatus_Error:
+		default:
+			Debug(driver, 0, "[wgpu] Failed to acquire surface texture, status={}", static_cast<int>(surface_texture.status));
+			return;
+	}
+
+	int w = _screen.width;
+	int h = _screen.height;
 
 	/* 2. Upload video_buffer (CPU framebuffer) to the intermediate screen texture. */
 	WGPUTexelCopyTextureInfo dst_info{};
@@ -584,8 +628,11 @@ void VideoDriver_Wgpu::RenderFrame()
 	wgpuCommandEncoderRelease(encoder);
 
 	wgpuTextureViewRelease(surface_view);
+	WGPUStatus present_status = wgpuSurfacePresent(surface);
+	if (present_status != WGPUStatus_Success) {
+		Debug(driver, 0, "[wgpu] Surface present failed, status={}", static_cast<int>(present_status));
+	}
 	wgpuTextureRelease(surface_texture.texture);
-	wgpuSurfacePresent(surface);
 }
 
 void VideoDriver_Wgpu::Paint()
@@ -635,8 +682,12 @@ void VideoDriver_Wgpu::ResizeWindow(int w, int h)
 	if (w < 64) w = 64;
 	if (h < 64) h = 64;
 
+	int drawable_w = w;
+	int drawable_h = h;
+	this->GetDrawableSize(drawable_w, drawable_h);
+
 	this->DestroyBlitResources();
-	this->gpu_device.Resize(w, h);
+	this->gpu_device.Resize(drawable_w, drawable_h);
 
 	this->video_buffer.assign(static_cast<size_t>(w) * h, 0);
 	this->anim_buffer.assign(static_cast<size_t>(w) * h, 0);

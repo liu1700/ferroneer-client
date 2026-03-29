@@ -489,6 +489,14 @@ std::optional<std::string_view> VideoDriver_Wgpu::Start(const StringList &param)
 	/* Create GPU blit resources (intermediate texture + fullscreen pipeline). */
 	this->CreateBlitResources(static_cast<int>(w), static_cast<int>(h));
 
+	/* Initialise the GPU renderer (sprite pipeline + UI composite). */
+	if (!this->renderer.Init(&this->gpu_device)) {
+		Debug(driver, 0, "wgpu: GpuRenderer::Init() failed (non-fatal, UI blit still works)");
+	}
+
+	/* Expose the global command buffer pointer for viewport hooks. */
+	_gpu_command_buffer = &this->command_buffer;
+
 	this->driver_info = "wgpu (WebGPU native)";
 
 	SDL_StopTextInput();
@@ -507,6 +515,9 @@ std::optional<std::string_view> VideoDriver_Wgpu::Start(const StringList &param)
 
 void VideoDriver_Wgpu::Stop()
 {
+	_gpu_command_buffer = nullptr;
+	this->renderer.Shutdown();
+
 	this->DestroyBlitResources();
 
 	_sprite_atlas = nullptr;
@@ -548,6 +559,17 @@ void VideoDriver_Wgpu::MainLoop()
 void VideoDriver_Wgpu::RenderFrame()
 {
 	if (!this->gpu_device.IsReady()) return;
+
+	/* Use the GpuRenderer for the full frame if it's ready. */
+	if (this->renderer.BeginFrame()) {
+		this->renderer.SubmitSprites(this->command_buffer);
+		this->renderer.CompositeUI(this->video_buffer.data(), _screen.width, _screen.height);
+		this->renderer.Present();
+		this->command_buffer.Reset();
+		return;
+	}
+
+	/* Fallback: old blit-only path (surface not ready or renderer not initialised). */
 	if (this->blit_pipeline == nullptr) return;
 
 	WGPUSurface surface = this->gpu_device.GetSurface();
@@ -715,6 +737,7 @@ void VideoDriver_Wgpu::ResizeWindow(int w, int h)
 
 	this->DestroyBlitResources();
 	this->gpu_device.Resize(drawable_w, drawable_h);
+	this->renderer.Resize(drawable_w, drawable_h);
 
 	this->video_buffer.assign(static_cast<size_t>(w) * h, 0);
 	this->anim_buffer.assign(static_cast<size_t>(w) * h, 0);

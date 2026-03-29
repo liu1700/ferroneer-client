@@ -12,6 +12,7 @@
 #ifdef WITH_WGPU
 
 #include "wgpu_device.h"
+#include "remap_table.h"
 #include "sprite_command.h"
 
 #include <vector>
@@ -63,6 +64,9 @@ private:
 	WGPUBuffer viewport_uniform_buf = nullptr;
 	WGPUBindGroupLayout atlas_bgl = nullptr;       ///< group(1): atlas textures + sampler.
 	WGPUSampler atlas_sampler = nullptr;
+	RemapTable remap_table;                        ///< 256x256 RGBA remap lookup texture.
+	WGPUSampler remap_sampler = nullptr;           ///< Nearest-filter sampler for remap table.
+	bool remap_table_built = false;                ///< Whether the remap table has been built.
 	std::vector<WGPUBindGroup> atlas_bind_groups;  ///< One per atlas page, lazily created.
 	WGPUBuffer instance_buffer = nullptr;
 	size_t instance_buffer_capacity = 0;           ///< In number of GpuSpriteInstance elements.
@@ -95,6 +99,7 @@ private:
 	void CreateViewportUniform();
 	void UpdateViewportUniform(int w, int h);
 	void EnsureInstanceBuffer(size_t required_count);
+	void EnsureRemapTable();
 	void EnsureAtlasBindGroups(uint16_t page_count);
 	void CreateUIResources(int w, int h);
 	void DestroyUIResources();

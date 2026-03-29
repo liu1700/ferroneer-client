@@ -34,6 +34,8 @@ struct ViewportUniforms {
 @group(1) @binding(0) var atlas_rgba: texture_2d<f32>;
 @group(1) @binding(1) var atlas_m: texture_2d<f32>;
 @group(1) @binding(2) var atlas_sampler: sampler;
+@group(1) @binding(3) var remap_table: texture_2d<f32>;
+@group(1) @binding(4) var remap_sampler: sampler;
 
 struct SpriteInstance {
     @location(0) screen_pos: vec2f,
@@ -89,6 +91,16 @@ struct VertexOutput {
     /* Alpha test — discard fully transparent pixels. */
     if (color.a < 0.01) {
         discard;
+    }
+
+    /* Mode 1 (Remap): apply M-channel recoloring via remap table. */
+    if (in.mode == 1u) {
+        let m = textureSample(atlas_m, atlas_sampler, in.uv).r;
+        if (m > 0.001) {
+            let remap_uv = vec2f(m, (f32(in.remap_index) + 0.5) / 256.0);
+            let remapped = textureSample(remap_table, remap_sampler, remap_uv);
+            color = vec4f(remapped.rgb, color.a);
+        }
     }
 
     /* Mode 2: transparent darkening (like PALETTE_TO_TRANSPARENT). */
@@ -197,9 +209,9 @@ bool GpuRenderer::Init(WgpuDevice *device)
 		this->viewport_bgl = wgpuDeviceCreateBindGroupLayout(d, &bgl_desc);
 	}
 
-	/* --- 3. Atlas bind group layout: group(1) = rgba texture, m texture, sampler --- */
+	/* --- 3. Atlas bind group layout: group(1) = rgba, m, sampler, remap_table, remap_sampler --- */
 	{
-		WGPUBindGroupLayoutEntry entries[3]{};
+		WGPUBindGroupLayoutEntry entries[5]{};
 
 		/* binding 0 — atlas RGBA texture */
 		entries[0].nextInChain = nullptr;
@@ -223,7 +235,7 @@ bool GpuRenderer::Init(WgpuDevice *device)
 		entries[1].sampler = {};
 		entries[1].storageTexture = {};
 
-		/* binding 2 — sampler */
+		/* binding 2 — atlas sampler */
 		entries[2].nextInChain = nullptr;
 		entries[2].binding = 2;
 		entries[2].visibility = WGPUShaderStage_Fragment;
@@ -232,10 +244,30 @@ bool GpuRenderer::Init(WgpuDevice *device)
 		entries[2].texture = {};
 		entries[2].storageTexture = {};
 
+		/* binding 3 — remap table texture */
+		entries[3].nextInChain = nullptr;
+		entries[3].binding = 3;
+		entries[3].visibility = WGPUShaderStage_Fragment;
+		entries[3].texture.sampleType = WGPUTextureSampleType_Float;
+		entries[3].texture.viewDimension = WGPUTextureViewDimension_2D;
+		entries[3].texture.multisampled = false;
+		entries[3].buffer = {};
+		entries[3].sampler = {};
+		entries[3].storageTexture = {};
+
+		/* binding 4 — remap sampler (nearest filtering) */
+		entries[4].nextInChain = nullptr;
+		entries[4].binding = 4;
+		entries[4].visibility = WGPUShaderStage_Fragment;
+		entries[4].sampler.type = WGPUSamplerBindingType_Filtering;
+		entries[4].buffer = {};
+		entries[4].texture = {};
+		entries[4].storageTexture = {};
+
 		WGPUBindGroupLayoutDescriptor bgl_desc{};
 		bgl_desc.nextInChain = nullptr;
 		bgl_desc.label = {.data = "atlas_bgl", .length = WGPU_STRLEN};
-		bgl_desc.entryCount = 3;
+		bgl_desc.entryCount = 5;
 		bgl_desc.entries = entries;
 		this->atlas_bgl = wgpuDeviceCreateBindGroupLayout(d, &bgl_desc);
 	}
@@ -382,6 +414,24 @@ bool GpuRenderer::Init(WgpuDevice *device)
 		samp_desc.compare = WGPUCompareFunction_Undefined;
 		samp_desc.maxAnisotropy = 1;
 		this->atlas_sampler = wgpuDeviceCreateSampler(d, &samp_desc);
+	}
+
+	/* --- 11b. Remap sampler (nearest filtering for exact palette lookups) --- */
+	{
+		WGPUSamplerDescriptor remap_desc{};
+		remap_desc.nextInChain = nullptr;
+		remap_desc.label = {.data = "remap_sampler", .length = WGPU_STRLEN};
+		remap_desc.addressModeU = WGPUAddressMode_ClampToEdge;
+		remap_desc.addressModeV = WGPUAddressMode_ClampToEdge;
+		remap_desc.addressModeW = WGPUAddressMode_ClampToEdge;
+		remap_desc.magFilter = WGPUFilterMode_Nearest;
+		remap_desc.minFilter = WGPUFilterMode_Nearest;
+		remap_desc.mipmapFilter = WGPUMipmapFilterMode_Nearest;
+		remap_desc.lodMinClamp = 0.0f;
+		remap_desc.lodMaxClamp = 1.0f;
+		remap_desc.compare = WGPUCompareFunction_Undefined;
+		remap_desc.maxAnisotropy = 1;
+		this->remap_sampler = wgpuDeviceCreateSampler(d, &remap_desc);
 	}
 
 	/* --- 12. Viewport uniform buffer + bind group --- */
@@ -692,6 +742,11 @@ void GpuRenderer::Shutdown()
 	}
 	this->atlas_bind_groups.clear();
 
+	/* Remap table + sampler. */
+	this->remap_table.Shutdown();
+	this->remap_table_built = false;
+	if (this->remap_sampler != nullptr) { wgpuSamplerRelease(this->remap_sampler); this->remap_sampler = nullptr; }
+
 	/* Atlas sampler. */
 	if (this->atlas_sampler != nullptr) { wgpuSamplerRelease(this->atlas_sampler); this->atlas_sampler = nullptr; }
 
@@ -837,9 +892,20 @@ void GpuRenderer::EnsureInstanceBuffer(size_t required_count)
  * Helper: EnsureAtlasBindGroups — lazily create per-page bind groups
  * -------------------------------------------------------------------------*/
 
+void GpuRenderer::EnsureRemapTable()
+{
+	if (this->remap_table_built) return;
+	if (this->remap_table.Build()) {
+		this->remap_table_built = true;
+	}
+}
+
 void GpuRenderer::EnsureAtlasBindGroups(uint16_t page_count)
 {
 	if (_sprite_atlas == nullptr) return;
+
+	/* Ensure the remap table is built before creating bind groups. */
+	this->EnsureRemapTable();
 
 	/* Grow vector if needed. */
 	while (this->atlas_bind_groups.size() < page_count) {
@@ -847,6 +913,10 @@ void GpuRenderer::EnsureAtlasBindGroups(uint16_t page_count)
 	}
 
 	WGPUDevice d = this->dev->GetDevice();
+
+	/* Get remap table texture (may be nullptr if build failed). */
+	WGPUTexture remap_tex = this->remap_table.GetTexture();
+	if (remap_tex == nullptr) return;
 
 	for (uint16_t page = 0; page < page_count; ++page) {
 		/* Skip pages that already have a bind group. */
@@ -876,8 +946,13 @@ void GpuRenderer::EnsureAtlasBindGroups(uint16_t page_count)
 		view_desc.format = WGPUTextureFormat_R8Unorm;
 		WGPUTextureView m_view = wgpuTextureCreateView(m_tex, &view_desc);
 
-		/* Create bind group: rgba texture, m texture, sampler. */
-		WGPUBindGroupEntry entries[3]{};
+		/* Remap table texture view. */
+		view_desc.label = {.data = "remap_table_view", .length = WGPU_STRLEN};
+		view_desc.format = WGPUTextureFormat_RGBA8Unorm;
+		WGPUTextureView remap_view = wgpuTextureCreateView(remap_tex, &view_desc);
+
+		/* Create bind group: rgba, m, atlas_sampler, remap_table, remap_sampler. */
+		WGPUBindGroupEntry entries[5]{};
 
 		entries[0].nextInChain = nullptr;
 		entries[0].binding = 0;
@@ -903,17 +978,34 @@ void GpuRenderer::EnsureAtlasBindGroups(uint16_t page_count)
 		entries[2].offset = 0;
 		entries[2].size = 0;
 
+		entries[3].nextInChain = nullptr;
+		entries[3].binding = 3;
+		entries[3].textureView = remap_view;
+		entries[3].buffer = nullptr;
+		entries[3].offset = 0;
+		entries[3].size = 0;
+		entries[3].sampler = nullptr;
+
+		entries[4].nextInChain = nullptr;
+		entries[4].binding = 4;
+		entries[4].sampler = this->remap_sampler;
+		entries[4].textureView = nullptr;
+		entries[4].buffer = nullptr;
+		entries[4].offset = 0;
+		entries[4].size = 0;
+
 		WGPUBindGroupDescriptor bg_desc{};
 		bg_desc.nextInChain = nullptr;
 		bg_desc.label = {.data = "atlas_bind_group", .length = WGPU_STRLEN};
 		bg_desc.layout = this->atlas_bgl;
-		bg_desc.entryCount = 3;
+		bg_desc.entryCount = 5;
 		bg_desc.entries = entries;
 		this->atlas_bind_groups[page] = wgpuDeviceCreateBindGroup(d, &bg_desc);
 
 		/* Views are now owned by the bind group. */
 		wgpuTextureViewRelease(rgba_view);
 		wgpuTextureViewRelease(m_view);
+		wgpuTextureViewRelease(remap_view);
 
 		Debug(driver, 1, "[gpu_renderer] Created atlas bind group for page {}", page);
 	}

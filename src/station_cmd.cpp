@@ -1099,6 +1099,21 @@ static CommandCost CheckFlatLandRoadStop(TileIndex cur_tile, int &allowed_z, con
 	if (ret.Failed()) return ret;
 	cost.AddCost(ret.GetCost());
 
+	/* [Ferroneer] For normal (non-drive-through) stops on inclined slopes,
+	 * reject placement when the entrance faces uphill and the adjacent tile
+	 * has no road — vehicles would exit uphill into nothing and get stuck. */
+	if (!is_drive_through) {
+		Slope cur_slope = GetTileSlope(cur_tile);
+		DiagDirection ddir = (DiagDirection)FindFirstBit(invalid_dirs.base());
+		if (IsInclinedSlope(cur_slope) && GetInclinedSlopeDirection(cur_slope) == ddir) {
+			TileIndex adjacent = TileAddByDiagDir(cur_tile, ddir);
+			RoadTramType rtt = GetRoadTramType(rt);
+			if (IsValidTile(adjacent) && (!MayHaveRoad(adjacent) || !HasTileRoadType(adjacent, rtt))) {
+				return CommandCost(STR_FERRONEER_STATION_SLOPE_NO_EXIT);
+			}
+		}
+	}
+
 	ret = IsRoadStationBridgeAboveOk(cur_tile, spec, station_type, is_drive_through ? GFX_TRUCK_BUS_DRIVETHROUGH_OFFSET + axis : FindFirstBit(invalid_dirs.base()));
 	if (ret.Failed()) return ret;
 

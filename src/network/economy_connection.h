@@ -10,14 +10,15 @@
 #ifndef NETWORK_ECONOMY_CONNECTION_H
 #define NETWORK_ECONOMY_CONNECTION_H
 
-#ifdef WITH_ECONOMY_SERVER
 
 #include <ixwebsocket/IXWebSocket.h>
 #include <nlohmann/json.hpp>
 #include <string>
+#include <string_view>
 #include <cstdint>
 #include <mutex>
 #include <queue>
+#include <span>
 #include <functional>
 #include <unordered_map>
 
@@ -56,6 +57,9 @@ public:
 
 	/** @return the player_id assigned by the server, or 0 if not connected. */
 	uint32_t GetPlayerId() const;
+
+	/** @return a monotonically increasing request id for command messages. */
+	uint32_t NextRequestId() { return this->next_request_id++; }
 
 	/**
 	 * Send a game command to the economy server for validation.
@@ -109,6 +113,15 @@ extern EconomyConnection *_economy_connection;
 
 void EconomyConnectionInit(const std::string &url, const std::string &player_name);
 
-#endif /* WITH_ECONOMY_SERVER */
+/* Console command handlers for economy server interaction. */
+bool ConEconomyBuySite(std::span<std::string_view> argv);
+bool ConEconomyUpgradeSite(std::span<std::string_view> argv);
+bool ConEconomyBuildFactory(std::span<std::string_view> argv);
+bool ConEconomyPlaceOrder(std::span<std::string_view> argv);
+bool ConEconomyAcceptContract(std::span<std::string_view> argv);
+bool ConEconomyDeliverContract(std::span<std::string_view> argv);
+bool ConEconomyQueryPlayer(std::span<std::string_view> argv);
+bool ConEconomyQueryContracts(std::span<std::string_view> argv);
+bool ConEconomyQueryMarket(std::span<std::string_view> argv);
 
 #endif /* NETWORK_ECONOMY_CONNECTION_H */

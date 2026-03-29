@@ -8,6 +8,7 @@ endif()
 
 add_subdirectory(3rdparty)
 add_subdirectory(ai)
+add_subdirectory(gpu)
 add_subdirectory(blitter)
 add_subdirectory(core)
 add_subdirectory(fontcache)
@@ -183,6 +184,8 @@ add_files(
     fileio.cpp
     fileio_func.h
     fileio_type.h
+    ferroneer_welcome_gui.cpp
+    ferroneer_welcome_gui.h
     fios.cpp
     fios.h
     fios_gui.cpp

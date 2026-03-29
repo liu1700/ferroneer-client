@@ -10,12 +10,12 @@
 #include "../stdafx.h"
 #include "economy_connection.h"
 
-#ifdef WITH_ECONOMY_SERVER
-
 #include "economy_protocol.h"
 #include "economy_data.h"
 #include "../debug.h"
 #include "../console_func.h"
+#include "../core/string_consumer.hpp"
+#include "../ferroneer_welcome_gui.h"
 
 #include "../safeguards.h"
 
@@ -236,6 +236,15 @@ void EconomyConnection::ProcessMessage(const nlohmann::json &msg)
 
 			_economy_data.valid = true;
 
+			/* Show welcome guide once on first snapshot. */
+			{
+				static bool welcome_shown = false;
+				if (!welcome_shown) {
+					welcome_shown = true;
+					ShowFerroneerWelcomeWindow();
+				}
+			}
+
 			IConsolePrint(CC_INFO, "[Economy] Day {} | Price Index: {} | Faucet: ${:.0f} | Drain: ${:.0f}",
 				_economy_data.day, _economy_data.price_index,
 				_economy_data.daily_faucet, _economy_data.daily_drain);
@@ -249,10 +258,339 @@ void EconomyConnection::ProcessMessage(const nlohmann::json &msg)
 			break;
 		}
 
+		case EconomyProtocol::ServerMsgType::PlayerEconomyState: {
+			uint32_t pid = msg.value("player_id", 0u);
+			double cash = msg.value("cash", 0.0);
+			std::string phase = msg.value("phase", "transport");
+			IConsolePrint(CC_INFO, "[Economy] Player {} | Cash: ${:.0f} | Phase: {}", pid, cash, phase);
+			if (msg.contains("owned_sites")) {
+				for (const auto &s : msg["owned_sites"]) {
+					IConsolePrint(CC_INFO, "[Economy]   Site #{} level {} output {:.1f}/day",
+						s.value("site_id", 0u), s.value("level", 1u), s.value("daily_output", 0.0));
+				}
+			}
+			if (msg.contains("owned_factories")) {
+				for (const auto &f : msg["owned_factories"]) {
+					IConsolePrint(CC_INFO, "[Economy]   Factory type {} at ({},{})",
+						f.value("factory_type", 0u), f.value("tile_x", 0), f.value("tile_y", 0));
+				}
+			}
+			break;
+		}
+
+		case EconomyProtocol::ServerMsgType::ContractList: {
+			if (msg.contains("contracts")) {
+				IConsolePrint(CC_INFO, "[Economy] Contracts ({}):", msg["contracts"].size());
+				for (const auto &c : msg["contracts"]) {
+					IConsolePrint(CC_INFO, "[Economy]   #{} {} {:.0f}t {}→{} | ${:.0f} | status: {} | deadline: day {}",
+						c.value("contract_id", 0ull),
+						c.value("commodity", "?"),
+						c.value("quantity", 0.0),
+						c.value("origin_town", "?"),
+						c.value("destination_town", "?"),
+						c.value("payment", 0.0),
+						c.value("status", "?"),
+						c.value("deadline_day", 0ull));
+				}
+			}
+			break;
+		}
+
+		case EconomyProtocol::ServerMsgType::MarketOrderList: {
+			if (msg.contains("orders")) {
+				IConsolePrint(CC_INFO, "[Economy] Market Orders ({}):", msg["orders"].size());
+				for (const auto &o : msg["orders"]) {
+					IConsolePrint(CC_INFO, "[Economy]   #{} {} {} {:.1f}t @ ${:.0f} | player {} | expires day {}",
+						o.value("order_id", 0ull),
+						o.value("side", "?"),
+						o.value("commodity", "?"),
+						o.value("quantity", 0.0),
+						o.value("price_per_ton", 0.0),
+						o.value("player_id", 0u),
+						o.value("expires_day", 0ull));
+				}
+			}
+			break;
+		}
+
 		case EconomyProtocol::ServerMsgType::Unknown:
 			Debug(net, 0, "[economy] Unknown server message type");
 			break;
 	}
 }
 
-#endif /* WITH_ECONOMY_SERVER */
+/*
+ * Console command handlers for economy server interaction.
+ * Each function follows the IConsoleCmdProc signature.
+ */
+
+/** Buy a resource site. Usage: economy_buy_site <site_id> */
+bool ConEconomyBuySite(std::span<std::string_view> argv)
+{
+	if (argv.empty()) {
+		IConsolePrint(CC_HELP, "Purchase a resource site. Usage: 'economy_buy_site <site_id>'.");
+		return true;
+	}
+
+	if (_economy_connection == nullptr || !_economy_connection->IsConnected()) {
+		IConsolePrint(CC_ERROR, "Not connected to economy server.");
+		return true;
+	}
+
+	if (argv.size() != 2) {
+		IConsolePrint(CC_ERROR, "Usage: economy_buy_site <site_id>");
+		return true;
+	}
+
+	auto site_id = ParseInteger<uint32_t>(argv[1]);
+	if (!site_id.has_value()) {
+		IConsolePrint(CC_ERROR, "Invalid site_id: {}", argv[1]);
+		return true;
+	}
+
+	std::string msg = EconomyProtocol::MakePurchaseResourceSite(_economy_connection->NextRequestId(), *site_id);
+	_economy_connection->Send(nlohmann::json::parse(msg));
+	IConsolePrint(CC_INFO, "[Economy] Sent PurchaseResourceSite for site #{}", *site_id);
+	return true;
+}
+
+/** Upgrade a resource site. Usage: economy_upgrade_site <site_id> */
+bool ConEconomyUpgradeSite(std::span<std::string_view> argv)
+{
+	if (argv.empty()) {
+		IConsolePrint(CC_HELP, "Upgrade a resource site. Usage: 'economy_upgrade_site <site_id>'.");
+		return true;
+	}
+
+	if (_economy_connection == nullptr || !_economy_connection->IsConnected()) {
+		IConsolePrint(CC_ERROR, "Not connected to economy server.");
+		return true;
+	}
+
+	if (argv.size() != 2) {
+		IConsolePrint(CC_ERROR, "Usage: economy_upgrade_site <site_id>");
+		return true;
+	}
+
+	auto site_id = ParseInteger<uint32_t>(argv[1]);
+	if (!site_id.has_value()) {
+		IConsolePrint(CC_ERROR, "Invalid site_id: {}", argv[1]);
+		return true;
+	}
+
+	std::string msg = EconomyProtocol::MakeUpgradeResourceSite(_economy_connection->NextRequestId(), *site_id);
+	_economy_connection->Send(nlohmann::json::parse(msg));
+	IConsolePrint(CC_INFO, "[Economy] Sent UpgradeResourceSite for site #{}", *site_id);
+	return true;
+}
+
+/** Build a factory. Usage: economy_build_factory <type> <x> <y> */
+bool ConEconomyBuildFactory(std::span<std::string_view> argv)
+{
+	if (argv.empty()) {
+		IConsolePrint(CC_HELP, "Build a factory. Usage: 'economy_build_factory <type> <x> <y>'.");
+		return true;
+	}
+
+	if (_economy_connection == nullptr || !_economy_connection->IsConnected()) {
+		IConsolePrint(CC_ERROR, "Not connected to economy server.");
+		return true;
+	}
+
+	if (argv.size() != 4) {
+		IConsolePrint(CC_ERROR, "Usage: economy_build_factory <type> <x> <y>");
+		return true;
+	}
+
+	auto factory_type = ParseInteger<uint8_t>(argv[1]);
+	auto x = ParseInteger<int32_t>(argv[2]);
+	auto y = ParseInteger<int32_t>(argv[3]);
+	if (!factory_type.has_value() || !x.has_value() || !y.has_value()) {
+		IConsolePrint(CC_ERROR, "Invalid arguments. type, x, y must be integers.");
+		return true;
+	}
+
+	std::string msg = EconomyProtocol::MakeBuildFactory(_economy_connection->NextRequestId(), *factory_type, *x, *y);
+	_economy_connection->Send(nlohmann::json::parse(msg));
+	IConsolePrint(CC_INFO, "[Economy] Sent BuildFactory type={} at ({},{})", *factory_type, *x, *y);
+	return true;
+}
+
+/** Place a market order. Usage: economy_place_order <buy|sell> <commodity 0-6> <qty> <price> */
+bool ConEconomyPlaceOrder(std::span<std::string_view> argv)
+{
+	if (argv.empty()) {
+		IConsolePrint(CC_HELP, "Place a market order. Usage: 'economy_place_order <buy|sell> <commodity 0-6> <qty> <price>'.");
+		return true;
+	}
+
+	if (_economy_connection == nullptr || !_economy_connection->IsConnected()) {
+		IConsolePrint(CC_ERROR, "Not connected to economy server.");
+		return true;
+	}
+
+	if (argv.size() != 5) {
+		IConsolePrint(CC_ERROR, "Usage: economy_place_order <buy|sell> <commodity 0-6> <qty> <price>");
+		return true;
+	}
+
+	uint8_t side;
+	if (argv[1] == "buy") {
+		side = 0;
+	} else if (argv[1] == "sell") {
+		side = 1;
+	} else {
+		IConsolePrint(CC_ERROR, "Side must be 'buy' or 'sell', got: {}", argv[1]);
+		return true;
+	}
+
+	auto commodity = ParseInteger<uint8_t>(argv[2]);
+	if (!commodity.has_value() || *commodity > 6) {
+		IConsolePrint(CC_ERROR, "Commodity must be 0-6, got: {}", argv[2]);
+		return true;
+	}
+
+	auto qty = ParseInteger<uint32_t>(argv[3]);
+	auto price = ParseInteger<uint32_t>(argv[4]);
+	if (!qty.has_value() || !price.has_value()) {
+		IConsolePrint(CC_ERROR, "Quantity and price must be integers.");
+		return true;
+	}
+
+	std::string msg = EconomyProtocol::MakePlaceMarketOrder(
+		_economy_connection->NextRequestId(), side, *commodity,
+		static_cast<double>(*qty), static_cast<double>(*price));
+	_economy_connection->Send(nlohmann::json::parse(msg));
+	IConsolePrint(CC_INFO, "[Economy] Sent PlaceMarketOrder {} commodity={} qty={} price={}",
+		argv[1], *commodity, *qty, *price);
+	return true;
+}
+
+/** Accept a contract. Usage: economy_accept_contract <contract_id> */
+bool ConEconomyAcceptContract(std::span<std::string_view> argv)
+{
+	if (argv.empty()) {
+		IConsolePrint(CC_HELP, "Accept an NPC contract. Usage: 'economy_accept_contract <contract_id>'.");
+		return true;
+	}
+
+	if (_economy_connection == nullptr || !_economy_connection->IsConnected()) {
+		IConsolePrint(CC_ERROR, "Not connected to economy server.");
+		return true;
+	}
+
+	if (argv.size() != 2) {
+		IConsolePrint(CC_ERROR, "Usage: economy_accept_contract <contract_id>");
+		return true;
+	}
+
+	auto contract_id = ParseInteger<uint64_t>(argv[1]);
+	if (!contract_id.has_value()) {
+		IConsolePrint(CC_ERROR, "Invalid contract_id: {}", argv[1]);
+		return true;
+	}
+
+	std::string msg = EconomyProtocol::MakeAcceptContract(_economy_connection->NextRequestId(), *contract_id);
+	_economy_connection->Send(nlohmann::json::parse(msg));
+	IConsolePrint(CC_INFO, "[Economy] Sent AcceptContract #{}", *contract_id);
+	return true;
+}
+
+/** Deliver goods for a contract. Usage: economy_deliver_contract <contract_id> <qty> */
+bool ConEconomyDeliverContract(std::span<std::string_view> argv)
+{
+	if (argv.empty()) {
+		IConsolePrint(CC_HELP, "Deliver goods for a contract. Usage: 'economy_deliver_contract <contract_id> <qty>'.");
+		return true;
+	}
+
+	if (_economy_connection == nullptr || !_economy_connection->IsConnected()) {
+		IConsolePrint(CC_ERROR, "Not connected to economy server.");
+		return true;
+	}
+
+	if (argv.size() != 3) {
+		IConsolePrint(CC_ERROR, "Usage: economy_deliver_contract <contract_id> <qty>");
+		return true;
+	}
+
+	auto contract_id = ParseInteger<uint64_t>(argv[1]);
+	auto qty = ParseInteger<uint32_t>(argv[2]);
+	if (!contract_id.has_value() || !qty.has_value()) {
+		IConsolePrint(CC_ERROR, "Invalid arguments. contract_id and qty must be integers.");
+		return true;
+	}
+
+	std::string msg = EconomyProtocol::MakeDeliverContract(
+		_economy_connection->NextRequestId(), *contract_id, static_cast<double>(*qty));
+	_economy_connection->Send(nlohmann::json::parse(msg));
+	IConsolePrint(CC_INFO, "[Economy] Sent DeliverContract #{} qty={}", *contract_id, *qty);
+	return true;
+}
+
+/** Query own player economy state. Usage: economy_query_player */
+bool ConEconomyQueryPlayer(std::span<std::string_view> argv)
+{
+	if (argv.empty()) {
+		IConsolePrint(CC_HELP, "Query your player economy state. Usage: 'economy_query_player'.");
+		return true;
+	}
+
+	if (_economy_connection == nullptr || !_economy_connection->IsConnected()) {
+		IConsolePrint(CC_ERROR, "Not connected to economy server.");
+		return true;
+	}
+
+	std::string msg = EconomyProtocol::MakeQueryPlayerEconomy();
+	_economy_connection->Send(nlohmann::json::parse(msg));
+	IConsolePrint(CC_INFO, "[Economy] Sent QueryPlayerEconomy");
+	return true;
+}
+
+/** Query available contracts. Usage: economy_query_contracts */
+bool ConEconomyQueryContracts(std::span<std::string_view> argv)
+{
+	if (argv.empty()) {
+		IConsolePrint(CC_HELP, "Query available NPC contracts. Usage: 'economy_query_contracts'.");
+		return true;
+	}
+
+	if (_economy_connection == nullptr || !_economy_connection->IsConnected()) {
+		IConsolePrint(CC_ERROR, "Not connected to economy server.");
+		return true;
+	}
+
+	std::string msg = EconomyProtocol::MakeQueryContracts();
+	_economy_connection->Send(nlohmann::json::parse(msg));
+	IConsolePrint(CC_INFO, "[Economy] Sent QueryContracts");
+	return true;
+}
+
+/** Query market orders. Usage: economy_query_market [commodity] */
+bool ConEconomyQueryMarket(std::span<std::string_view> argv)
+{
+	if (argv.empty()) {
+		IConsolePrint(CC_HELP, "Query market orders. Usage: 'economy_query_market [commodity]'.");
+		IConsolePrint(CC_HELP, "  commodity is optional (e.g. 'IronOre', 'Coal', 'Steel').");
+		return true;
+	}
+
+	if (_economy_connection == nullptr || !_economy_connection->IsConnected()) {
+		IConsolePrint(CC_ERROR, "Not connected to economy server.");
+		return true;
+	}
+
+	std::string commodity;
+	if (argv.size() >= 2) {
+		commodity = std::string(argv[1]);
+	}
+
+	std::string msg = EconomyProtocol::MakeQueryMarketOrders(commodity);
+	_economy_connection->Send(nlohmann::json::parse(msg));
+	if (commodity.empty()) {
+		IConsolePrint(CC_INFO, "[Economy] Sent QueryMarketOrders (all)");
+	} else {
+		IConsolePrint(CC_INFO, "[Economy] Sent QueryMarketOrders for {}", commodity);
+	}
+	return true;
+}

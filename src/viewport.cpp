@@ -96,6 +96,9 @@
 
 #include "widgets/vehicle_widget.h"
 
+#include "road_gui.h"
+#include "station_func.h"
+
 #include "table/strings.h"
 #include "table/string_colours.h"
 
@@ -1138,7 +1141,39 @@ static void DrawTileSelection(const TileInfo *ti)
 			IsInsideBS(ti->y, _thd.pos.y, _thd.size.y)) {
 draw_inner:
 		if (_thd.drawstyle & HT_RECT) {
-			if (!is_redsq) DrawTileSelectionRect(ti, _thd.make_square_red ? PALETTE_SEL_TILE_RED : PAL_NONE);
+			/* Draw road stop building preview: dark silhouette for building shape,
+			 * then prominent green/red selection border for valid/invalid feedback. */
+			if (!_thd.make_square_red) {
+				RoadStopPreviewInfo preview = GetRoadStopPlacementPreview();
+				if (preview.active) {
+					StationType st = preview.is_bus ? StationType::Bus : StationType::Truck;
+					const DrawTileSprites *t = GetStationTileLayout(st, preview.orientation);
+
+					/* Draw building sequence sprites as dark silhouettes at correct positions.
+					 * Skip ground sprite — the selection border provides ground-level feedback. */
+					for (const DrawTileSeqStruct &dtss : t->GetSequence()) {
+						SpriteID image = dtss.image.sprite;
+						if (GB(image, 0, SPRITE_WIDTH) == 0) continue;
+
+						SpriteID timg = image;
+						SetBit(timg, PALETTE_MODIFIER_TRANSPARENT);
+						AddTileSpriteToDraw(timg, PALETTE_TO_TRANSPARENT,
+							ti->x + dtss.origin.x, ti->y + dtss.origin.y, ti->z + dtss.origin.z);
+						AddTileSpriteToDraw(timg, PALETTE_TO_TRANSPARENT,
+							ti->x + dtss.origin.x, ti->y + dtss.origin.y, ti->z + dtss.origin.z);
+						AddTileSpriteToDraw(timg, PALETTE_TO_TRANSPARENT,
+							ti->x + dtss.origin.x, ti->y + dtss.origin.y, ti->z + dtss.origin.z);
+					}
+				}
+			}
+
+			/* Draw selection border — 3x for visibility when preview is active. */
+			if (!is_redsq) {
+				PaletteID sel_pal = _thd.make_square_red ? PALETTE_SEL_TILE_RED : PAL_NONE;
+				DrawTileSelectionRect(ti, sel_pal);
+				DrawTileSelectionRect(ti, sel_pal);
+				DrawTileSelectionRect(ti, sel_pal);
+			}
 		} else if (_thd.drawstyle & HT_POINT) {
 			/* Figure out the Z coordinate for the single dot. */
 			int z = 0;

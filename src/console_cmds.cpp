@@ -50,6 +50,8 @@
 #include "network/network_content.h"
 #endif /* WITH_ZLIB */
 
+#include "network/economy_connection.h"
+
 #include "table/strings.h"
 
 #include "safeguards.h"
@@ -3101,4 +3103,15 @@ void IConsoleStdLibRegister()
 	IConsole::CmdRegister("newgrf_profile",          ConNewGRFProfile,    ConHookNewGRFDeveloperTool);
 
 	IConsole::CmdRegister("dump_info",               ConDumpInfo);
+
+	/* Economy server commands */
+	IConsole::CmdRegister("economy_buy_site",         ConEconomyBuySite);
+	IConsole::CmdRegister("economy_upgrade_site",     ConEconomyUpgradeSite);
+	IConsole::CmdRegister("economy_build_factory",    ConEconomyBuildFactory);
+	IConsole::CmdRegister("economy_place_order",      ConEconomyPlaceOrder);
+	IConsole::CmdRegister("economy_accept_contract",  ConEconomyAcceptContract);
+	IConsole::CmdRegister("economy_deliver_contract", ConEconomyDeliverContract);
+	IConsole::CmdRegister("economy_query_player",     ConEconomyQueryPlayer);
+	IConsole::CmdRegister("economy_query_contracts",  ConEconomyQueryContracts);
+	IConsole::CmdRegister("economy_query_market",     ConEconomyQueryMarket);
 }

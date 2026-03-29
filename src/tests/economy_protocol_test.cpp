@@ -9,8 +9,6 @@
 
 #include "../stdafx.h"
 
-#ifdef WITH_ECONOMY_SERVER
-
 #include "../3rdparty/catch2/catch.hpp"
 
 #include "../network/economy_protocol.h"
@@ -160,5 +158,3 @@ TEST_CASE("EconomyProtocol round-trip: MakeBuildRoad -> dump -> parse -> verify"
 	CHECK(parsed["command"]["end_y"] == 400);
 	CHECK(parsed["command"]["road_type"] == 2);
 }
-
-#endif /* WITH_ECONOMY_SERVER */

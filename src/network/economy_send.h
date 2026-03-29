@@ -10,7 +10,6 @@
 #ifndef NETWORK_ECONOMY_SEND_H
 #define NETWORK_ECONOMY_SEND_H
 
-#ifdef WITH_ECONOMY_SERVER
 
 #include "../command_type.h"
 #include "../company_type.h"
@@ -45,5 +44,4 @@ constexpr bool IsEconomyServerCommand(Commands cmd)
 	}
 }
 
-#endif /* WITH_ECONOMY_SERVER */
 #endif /* NETWORK_ECONOMY_SEND_H */

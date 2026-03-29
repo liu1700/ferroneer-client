@@ -21,6 +21,7 @@
 #include "../framerate_type.h"
 #include "../window_func.h"
 #include "wgpu_v.h"
+#include "../gpu/sprite_atlas.h"
 #include <SDL.h>
 #ifdef __APPLE__
 #	include <SDL_metal.h>
@@ -452,6 +453,22 @@ std::optional<std::string_view> VideoDriver_Wgpu::Start(const StringList &param)
 	/* Expose the global device pointer. */
 	_wgpu_device = &this->gpu_device;
 
+	/* Create the sprite atlas now that the GPU device is ready. */
+	static SpriteAtlas atlas_instance;
+	_sprite_atlas = &atlas_instance;
+
+	/* Temporary atlas smoke-test: upload a 64×64 red square. */
+	{
+		std::vector<uint8_t> test_rgba(64 * 64 * 4, 0);
+		for (size_t i = 0; i < test_rgba.size(); i += 4) {
+			test_rgba[i]     = 255; /* R */
+			test_rgba[i + 3] = 255; /* A */
+		}
+		AtlasEntry e = _sprite_atlas->Upload(0, test_rgba.data(), nullptr, 64, 64, 0, 0, ZoomLevel::Normal);
+		Debug(driver, 0, "atlas test: page={} uv=({:.5f},{:.5f})..({:.5f},{:.5f}) valid={}",
+			e.page, e.u0, e.v0, e.u1, e.v1, e.valid ? 1 : 0);
+	}
+
 	/* Allocate CPU-side pixel buffer for the blitter / UI layer. */
 	this->video_buffer.assign(static_cast<size_t>(w) * h, 0);
 	this->anim_buffer.assign(static_cast<size_t>(w) * h, 0);
@@ -483,6 +500,7 @@ void VideoDriver_Wgpu::Stop()
 {
 	this->DestroyBlitResources();
 
+	_sprite_atlas = nullptr;
 	_wgpu_device = nullptr;
 	this->gpu_device.Shutdown();
 

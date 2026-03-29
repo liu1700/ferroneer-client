@@ -153,6 +153,220 @@ static uint ConvertSdlKeycodeIntoMy_Wgpu(SDL_Keycode kc)
 }
 
 /* -------------------------------------------------------------------------
+ * Blit resources — intermediate texture + fullscreen triangle pipeline.
+ * -------------------------------------------------------------------------*/
+
+/** WGSL shader for fullscreen blit: vertex produces a large triangle,
+ *  fragment samples the CPU-uploaded screen texture. */
+static const char *const kBlitShaderWGSL = R"(
+@vertex fn vs(@builtin(vertex_index) vi: u32) -> @builtin(position) vec4f {
+    var pos = array<vec2f, 3>(
+        vec2f(-1.0, -1.0),
+        vec2f( 3.0, -1.0),
+        vec2f(-1.0,  3.0),
+    );
+    return vec4f(pos[vi], 0.0, 1.0);
+}
+
+@group(0) @binding(0) var screen_tex: texture_2d<f32>;
+@group(0) @binding(1) var screen_sampler: sampler;
+
+@fragment fn fs(@builtin(position) pos: vec4f) -> @location(0) vec4f {
+    let uv = pos.xy / vec2f(textureDimensions(screen_tex));
+    return textureSample(screen_tex, screen_sampler, uv);
+}
+)";
+
+void VideoDriver_Wgpu::CreateBlitResources(int w, int h)
+{
+	WGPUDevice device = this->gpu_device.GetDevice();
+
+	/* 1. Screen texture — CopyDst so we can upload CPU pixels, TextureBinding for sampling. */
+	WGPUTextureDescriptor tex_desc{};
+	tex_desc.nextInChain = nullptr;
+	tex_desc.label = {.data = "screen_texture", .length = WGPU_STRLEN};
+	tex_desc.usage = WGPUTextureUsage_CopyDst | WGPUTextureUsage_TextureBinding;
+	tex_desc.dimension = WGPUTextureDimension_2D;
+	tex_desc.size = {static_cast<uint32_t>(w), static_cast<uint32_t>(h), 1};
+	tex_desc.format = WGPUTextureFormat_BGRA8Unorm;
+	tex_desc.mipLevelCount = 1;
+	tex_desc.sampleCount = 1;
+	tex_desc.viewFormatCount = 0;
+	tex_desc.viewFormats = nullptr;
+	this->screen_texture = wgpuDeviceCreateTexture(device, &tex_desc);
+
+	/* 2. Nearest-neighbour sampler — pixel-perfect blit. */
+	WGPUSamplerDescriptor samp_desc{};
+	samp_desc.nextInChain = nullptr;
+	samp_desc.label = {.data = "blit_sampler", .length = WGPU_STRLEN};
+	samp_desc.addressModeU = WGPUAddressMode_ClampToEdge;
+	samp_desc.addressModeV = WGPUAddressMode_ClampToEdge;
+	samp_desc.addressModeW = WGPUAddressMode_ClampToEdge;
+	samp_desc.magFilter = WGPUFilterMode_Nearest;
+	samp_desc.minFilter = WGPUFilterMode_Nearest;
+	samp_desc.mipmapFilter = WGPUMipmapFilterMode_Nearest;
+	samp_desc.lodMinClamp = 0.0f;
+	samp_desc.lodMaxClamp = 1.0f;
+	samp_desc.compare = WGPUCompareFunction_Undefined;
+	samp_desc.maxAnisotropy = 1;
+	this->blit_sampler = wgpuDeviceCreateSampler(device, &samp_desc);
+
+	/* 3. Compile WGSL shader module. */
+	WGPUShaderSourceWGSL wgsl_src{};
+	wgsl_src.chain.next = nullptr;
+	wgsl_src.chain.sType = WGPUSType_ShaderSourceWGSL;
+	wgsl_src.code = {.data = kBlitShaderWGSL, .length = WGPU_STRLEN};
+
+	WGPUShaderModuleDescriptor sm_desc{};
+	sm_desc.nextInChain = &wgsl_src.chain;
+	sm_desc.label = {.data = "blit_shader", .length = WGPU_STRLEN};
+
+	WGPUShaderModule shader = wgpuDeviceCreateShaderModule(device, &sm_desc);
+
+	/* 4. Bind group layout: texture_2d<f32> + sampler (fragment-only). */
+	WGPUBindGroupLayoutEntry bgl_entries[2]{};
+
+	/* binding 0 — texture */
+	bgl_entries[0].nextInChain = nullptr;
+	bgl_entries[0].binding = 0;
+	bgl_entries[0].visibility = WGPUShaderStage_Fragment;
+	bgl_entries[0].texture.sampleType = WGPUTextureSampleType_Float;
+	bgl_entries[0].texture.viewDimension = WGPUTextureViewDimension_2D;
+	bgl_entries[0].texture.multisampled = false;
+	/* Zero-init the unused union members. */
+	bgl_entries[0].buffer = {};
+	bgl_entries[0].sampler = {};
+	bgl_entries[0].storageTexture = {};
+
+	/* binding 1 — sampler */
+	bgl_entries[1].nextInChain = nullptr;
+	bgl_entries[1].binding = 1;
+	bgl_entries[1].visibility = WGPUShaderStage_Fragment;
+	bgl_entries[1].sampler.type = WGPUSamplerBindingType_Filtering;
+	bgl_entries[1].buffer = {};
+	bgl_entries[1].texture = {};
+	bgl_entries[1].storageTexture = {};
+
+	WGPUBindGroupLayoutDescriptor bgl_desc{};
+	bgl_desc.nextInChain = nullptr;
+	bgl_desc.label = {.data = "blit_bgl", .length = WGPU_STRLEN};
+	bgl_desc.entryCount = 2;
+	bgl_desc.entries = bgl_entries;
+	this->blit_bgl = wgpuDeviceCreateBindGroupLayout(device, &bgl_desc);
+
+	/* 5. Pipeline layout from blit_bgl. */
+	WGPUPipelineLayoutDescriptor pl_desc{};
+	pl_desc.nextInChain = nullptr;
+	pl_desc.label = {.data = "blit_pipeline_layout", .length = WGPU_STRLEN};
+	pl_desc.bindGroupLayoutCount = 1;
+	pl_desc.bindGroupLayouts = &this->blit_bgl;
+	WGPUPipelineLayout pipeline_layout = wgpuDeviceCreatePipelineLayout(device, &pl_desc);
+
+	/* 6. Render pipeline — fullscreen triangle, no vertex buffers. */
+	WGPUColorTargetState color_target{};
+	color_target.nextInChain = nullptr;
+	color_target.format = this->gpu_device.GetSurfaceFormat();
+	color_target.blend = nullptr;
+	color_target.writeMask = WGPUColorWriteMask_All;
+
+	WGPUFragmentState frag_state{};
+	frag_state.nextInChain = nullptr;
+	frag_state.module = shader;
+	frag_state.entryPoint = {.data = "fs", .length = WGPU_STRLEN};
+	frag_state.constantCount = 0;
+	frag_state.constants = nullptr;
+	frag_state.targetCount = 1;
+	frag_state.targets = &color_target;
+
+	WGPURenderPipelineDescriptor rp_desc{};
+	rp_desc.nextInChain = nullptr;
+	rp_desc.label = {.data = "blit_pipeline", .length = WGPU_STRLEN};
+	rp_desc.layout = pipeline_layout;
+
+	rp_desc.vertex.nextInChain = nullptr;
+	rp_desc.vertex.module = shader;
+	rp_desc.vertex.entryPoint = {.data = "vs", .length = WGPU_STRLEN};
+	rp_desc.vertex.constantCount = 0;
+	rp_desc.vertex.constants = nullptr;
+	rp_desc.vertex.bufferCount = 0;
+	rp_desc.vertex.buffers = nullptr;
+
+	rp_desc.primitive.nextInChain = nullptr;
+	rp_desc.primitive.topology = WGPUPrimitiveTopology_TriangleList;
+	rp_desc.primitive.stripIndexFormat = WGPUIndexFormat_Undefined;
+	rp_desc.primitive.frontFace = WGPUFrontFace_CCW;
+	rp_desc.primitive.cullMode = WGPUCullMode_None;
+	rp_desc.primitive.unclippedDepth = false;
+
+	rp_desc.depthStencil = nullptr;
+
+	rp_desc.multisample.nextInChain = nullptr;
+	rp_desc.multisample.count = 1;
+	rp_desc.multisample.mask = 0xFFFFFFFF;
+	rp_desc.multisample.alphaToCoverageEnabled = false;
+
+	rp_desc.fragment = &frag_state;
+
+	this->blit_pipeline = wgpuDeviceCreateRenderPipeline(device, &rp_desc);
+
+	/* Pipeline layout is now owned by the pipeline — release our ref. */
+	wgpuPipelineLayoutRelease(pipeline_layout);
+	/* Shader module is now owned by the pipeline — release our ref. */
+	wgpuShaderModuleRelease(shader);
+
+	/* 7. Bind group: screen texture view + sampler. */
+	WGPUTextureViewDescriptor tv_desc{};
+	tv_desc.nextInChain = nullptr;
+	tv_desc.label = {.data = "screen_tex_view", .length = WGPU_STRLEN};
+	tv_desc.format = WGPUTextureFormat_BGRA8Unorm;
+	tv_desc.dimension = WGPUTextureViewDimension_2D;
+	tv_desc.baseMipLevel = 0;
+	tv_desc.mipLevelCount = 1;
+	tv_desc.baseArrayLayer = 0;
+	tv_desc.arrayLayerCount = 1;
+	tv_desc.aspect = WGPUTextureAspect_All;
+	tv_desc.usage = WGPUTextureUsage_TextureBinding;
+	WGPUTextureView tex_view = wgpuTextureCreateView(this->screen_texture, &tv_desc);
+
+	WGPUBindGroupEntry bg_entries[2]{};
+	bg_entries[0].nextInChain = nullptr;
+	bg_entries[0].binding = 0;
+	bg_entries[0].textureView = tex_view;
+	bg_entries[0].buffer = nullptr;
+	bg_entries[0].offset = 0;
+	bg_entries[0].size = 0;
+	bg_entries[0].sampler = nullptr;
+
+	bg_entries[1].nextInChain = nullptr;
+	bg_entries[1].binding = 1;
+	bg_entries[1].sampler = this->blit_sampler;
+	bg_entries[1].textureView = nullptr;
+	bg_entries[1].buffer = nullptr;
+	bg_entries[1].offset = 0;
+	bg_entries[1].size = 0;
+
+	WGPUBindGroupDescriptor bg_desc{};
+	bg_desc.nextInChain = nullptr;
+	bg_desc.label = {.data = "blit_bind_group", .length = WGPU_STRLEN};
+	bg_desc.layout = this->blit_bgl;
+	bg_desc.entryCount = 2;
+	bg_desc.entries = bg_entries;
+	this->blit_bind_group = wgpuDeviceCreateBindGroup(device, &bg_desc);
+
+	/* Texture view is now owned by the bind group — release our ref. */
+	wgpuTextureViewRelease(tex_view);
+}
+
+void VideoDriver_Wgpu::DestroyBlitResources()
+{
+	if (this->blit_bind_group != nullptr) { wgpuBindGroupRelease(this->blit_bind_group); this->blit_bind_group = nullptr; }
+	if (this->blit_pipeline != nullptr)   { wgpuRenderPipelineRelease(this->blit_pipeline); this->blit_pipeline = nullptr; }
+	if (this->blit_bgl != nullptr)        { wgpuBindGroupLayoutRelease(this->blit_bgl); this->blit_bgl = nullptr; }
+	if (this->blit_sampler != nullptr)     { wgpuSamplerRelease(this->blit_sampler); this->blit_sampler = nullptr; }
+	if (this->screen_texture != nullptr)   { wgpuTextureRelease(this->screen_texture); this->screen_texture = nullptr; }
+}
+
+/* -------------------------------------------------------------------------
  * VideoDriver_Wgpu — Start / Stop
  * -------------------------------------------------------------------------*/
 
@@ -229,6 +443,9 @@ std::optional<std::string_view> VideoDriver_Wgpu::Start(const StringList &param)
 	_screen.height  = static_cast<int>(h);
 	_screen.pitch   = static_cast<int>(w);
 
+	/* Create GPU blit resources (intermediate texture + fullscreen pipeline). */
+	this->CreateBlitResources(static_cast<int>(w), static_cast<int>(h));
+
 	this->driver_info = "wgpu (WebGPU native)";
 
 	SDL_StopTextInput();
@@ -247,6 +464,8 @@ std::optional<std::string_view> VideoDriver_Wgpu::Start(const StringList &param)
 
 void VideoDriver_Wgpu::Stop()
 {
+	this->DestroyBlitResources();
+
 	_wgpu_device = nullptr;
 	this->gpu_device.Shutdown();
 
@@ -285,27 +504,27 @@ void VideoDriver_Wgpu::MainLoop()
 void VideoDriver_Wgpu::RenderFrame()
 {
 	if (!this->gpu_device.IsReady()) return;
+	if (this->blit_pipeline == nullptr) return;
 
 	WGPUSurface surface = this->gpu_device.GetSurface();
 
-	/* Acquire next surface texture. */
+	/* 1. Acquire next surface texture. */
 	WGPUSurfaceTexture surface_texture;
 	wgpuSurfaceGetCurrentTexture(surface, &surface_texture);
 	if (surface_texture.status != WGPUSurfaceGetCurrentTextureStatus_SuccessOptimal &&
 		surface_texture.status != WGPUSurfaceGetCurrentTextureStatus_SuccessSuboptimal) return;
 
-	/* Upload the CPU-rendered framebuffer directly to the surface texture.
-	 * The blitter has drawn the game world + UI into video_buffer (BGRA8).
-	 * We copy it to the surface texture and present. */
 	int w = this->gpu_device.GetWidth();
 	int h = this->gpu_device.GetHeight();
 
-	WGPUTexelCopyTextureInfo dst_info = {};
-	dst_info.texture = surface_texture.texture;
+	/* 2. Upload video_buffer (CPU framebuffer) to the intermediate screen texture. */
+	WGPUTexelCopyTextureInfo dst_info{};
+	dst_info.texture = this->screen_texture;
 	dst_info.mipLevel = 0;
 	dst_info.origin = {0, 0, 0};
+	dst_info.aspect = WGPUTextureAspect_All;
 
-	WGPUTexelCopyBufferLayout layout = {};
+	WGPUTexelCopyBufferLayout layout{};
 	layout.offset = 0;
 	layout.bytesPerRow = static_cast<uint32_t>(w) * 4;
 	layout.rowsPerImage = static_cast<uint32_t>(h);
@@ -321,6 +540,50 @@ void VideoDriver_Wgpu::RenderFrame()
 		&extent
 	);
 
+	/* 3. Create a texture view for the surface texture (render target). */
+	WGPUTextureView surface_view = wgpuTextureCreateView(surface_texture.texture, nullptr);
+
+	/* 4. Encode a render pass that blits the screen texture onto the surface. */
+	WGPUCommandEncoderDescriptor enc_desc{};
+	enc_desc.nextInChain = nullptr;
+	enc_desc.label = {.data = "blit_encoder", .length = WGPU_STRLEN};
+	WGPUCommandEncoder encoder = wgpuDeviceCreateCommandEncoder(this->gpu_device.GetDevice(), &enc_desc);
+
+	WGPURenderPassColorAttachment color_att{};
+	color_att.nextInChain = nullptr;
+	color_att.view = surface_view;
+	color_att.depthSlice = WGPU_DEPTH_SLICE_UNDEFINED;
+	color_att.resolveTarget = nullptr;
+	color_att.loadOp = WGPULoadOp_Clear;
+	color_att.storeOp = WGPUStoreOp_Store;
+	color_att.clearValue = {0.0, 0.0, 0.0, 1.0};
+
+	WGPURenderPassDescriptor rp_desc{};
+	rp_desc.nextInChain = nullptr;
+	rp_desc.label = {.data = "blit_pass", .length = WGPU_STRLEN};
+	rp_desc.colorAttachmentCount = 1;
+	rp_desc.colorAttachments = &color_att;
+	rp_desc.depthStencilAttachment = nullptr;
+	rp_desc.occlusionQuerySet = nullptr;
+	rp_desc.timestampWrites = nullptr;
+
+	WGPURenderPassEncoder pass = wgpuCommandEncoderBeginRenderPass(encoder, &rp_desc);
+	wgpuRenderPassEncoderSetPipeline(pass, this->blit_pipeline);
+	wgpuRenderPassEncoderSetBindGroup(pass, 0, this->blit_bind_group, 0, nullptr);
+	wgpuRenderPassEncoderDraw(pass, 3, 1, 0, 0);
+	wgpuRenderPassEncoderEnd(pass);
+	wgpuRenderPassEncoderRelease(pass);
+
+	/* 5. Submit and present. */
+	WGPUCommandBufferDescriptor cb_desc{};
+	cb_desc.nextInChain = nullptr;
+	cb_desc.label = {.data = "blit_cmdbuf", .length = WGPU_STRLEN};
+	WGPUCommandBuffer cmd_buf = wgpuCommandEncoderFinish(encoder, &cb_desc);
+	wgpuQueueSubmit(this->gpu_device.GetQueue(), 1, &cmd_buf);
+	wgpuCommandBufferRelease(cmd_buf);
+	wgpuCommandEncoderRelease(encoder);
+
+	wgpuTextureViewRelease(surface_view);
 	wgpuTextureRelease(surface_texture.texture);
 	wgpuSurfacePresent(surface);
 }
@@ -372,6 +635,7 @@ void VideoDriver_Wgpu::ResizeWindow(int w, int h)
 	if (w < 64) w = 64;
 	if (h < 64) h = 64;
 
+	this->DestroyBlitResources();
 	this->gpu_device.Resize(w, h);
 
 	this->video_buffer.assign(static_cast<size_t>(w) * h, 0);
@@ -380,6 +644,8 @@ void VideoDriver_Wgpu::ResizeWindow(int w, int h)
 	_screen.width   = w;
 	_screen.height  = h;
 	_screen.pitch   = w;
+
+	this->CreateBlitResources(w, h);
 
 	BlitterFactory::GetCurrentBlitter()->PostResize();
 	GameSizeChanged();

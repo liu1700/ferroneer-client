@@ -126,7 +126,7 @@ bool WgpuDevice::Init(void *native_layer, int width, int height)
 	surf_cfg.nextInChain = nullptr;
 	surf_cfg.device = this->device;
 	surf_cfg.format = this->surface_format;
-	surf_cfg.usage = WGPUTextureUsage_RenderAttachment | WGPUTextureUsage_CopyDst;
+	surf_cfg.usage = WGPUTextureUsage_RenderAttachment;
 	surf_cfg.width = static_cast<uint32_t>(width);
 	surf_cfg.height = static_cast<uint32_t>(height);
 	surf_cfg.viewFormatCount = 0;
@@ -149,7 +149,7 @@ void WgpuDevice::Resize(int width, int height)
 	surf_cfg.nextInChain = nullptr;
 	surf_cfg.device = this->device;
 	surf_cfg.format = this->surface_format;
-	surf_cfg.usage = WGPUTextureUsage_RenderAttachment | WGPUTextureUsage_CopyDst;
+	surf_cfg.usage = WGPUTextureUsage_RenderAttachment;
 	surf_cfg.width = static_cast<uint32_t>(width);
 	surf_cfg.height = static_cast<uint32_t>(height);
 	surf_cfg.viewFormatCount = 0;

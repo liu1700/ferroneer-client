@@ -35,8 +35,12 @@ public:
 	std::string_view GetName() const override { return "wgpu"; }
 	std::string_view GetInfoString() const override { return this->driver_info; }
 
+	bool AfterBlitterChange() override;
 	bool HasAnimBuffer() override { return true; }
 	uint8_t *GetAnimBuffer() override { return this->anim_buffer.data(); }
+
+	void EditBoxGainedFocus() override;
+	void EditBoxLostFocus() override;
 
 protected:
 	void InputLoop() override;

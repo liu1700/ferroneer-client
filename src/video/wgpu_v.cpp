@@ -350,6 +350,33 @@ void VideoDriver_Wgpu::MakeDirty(int /*left*/, int /*top*/, int /*width*/, int /
 	/* GPU redraws the entire frame each tick — no dirty-rect tracking needed. */
 }
 
+bool VideoDriver_Wgpu::AfterBlitterChange()
+{
+	/* When the blitter changes (e.g. openttd_main overrides our selection),
+	 * the new blitter's internal buffers must be initialized. */
+	this->video_buffer.assign(static_cast<size_t>(_screen.width) * _screen.height, 0);
+	this->anim_buffer.assign(static_cast<size_t>(_screen.width) * _screen.height, 0);
+	_screen.dst_ptr = this->video_buffer.data();
+	BlitterFactory::GetCurrentBlitter()->PostResize();
+	return true;
+}
+
+void VideoDriver_Wgpu::EditBoxGainedFocus()
+{
+	if (!this->edit_box_focused) {
+		SDL_StartTextInput();
+		this->edit_box_focused = true;
+	}
+}
+
+void VideoDriver_Wgpu::EditBoxLostFocus()
+{
+	if (this->edit_box_focused) {
+		SDL_StopTextInput();
+		this->edit_box_focused = false;
+	}
+}
+
 void VideoDriver_Wgpu::ResizeWindow(int w, int h)
 {
 	if (w < 64) w = 64;

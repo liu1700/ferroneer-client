@@ -32,7 +32,7 @@ if(NOT OPTION_DEDICATED)
         wgpu_v.h
         wgpu_default_v.cpp
         wgpu_default_v.h
-        CONDITION WGPU_FOUND AND SDL2_FOUND
+        CONDITION WGPU_FOUND AND SDL2_FOUND AND APPLE
     )
 
     add_files(

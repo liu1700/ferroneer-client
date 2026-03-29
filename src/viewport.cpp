@@ -105,6 +105,7 @@
 #ifdef WITH_WGPU
 #include "gpu/sprite_command.h"
 #include "gpu/sprite_atlas.h"
+#include "gpu/remap_table.h"
 #endif
 
 #include "safeguards.h"
@@ -1656,7 +1657,8 @@ static void EmitGpuSpriteCommand(SpriteID image, PaletteID pal,
 		mode = GPU_SPRITE_TRANSPARENT;
 	} else if (HasBit(pal, PALETTE_MODIFIER_COLOUR)) {
 		mode = GPU_SPRITE_REMAP;
-		remap_idx = pal & 0xFF;
+		SpriteID recolour_id = pal & SPRITE_MASK;
+		remap_idx = (_remap_table != nullptr) ? _remap_table->GetRowIndex(recolour_id) : 0;
 	}
 
 	/* Determine tint colour and alpha for building preview / tile selection palettes. */

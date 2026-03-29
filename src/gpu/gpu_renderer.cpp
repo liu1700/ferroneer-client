@@ -745,6 +745,7 @@ void GpuRenderer::Shutdown()
 	/* Remap table + sampler. */
 	this->remap_table.Shutdown();
 	this->remap_table_built = false;
+	_remap_table = nullptr;
 	if (this->remap_sampler != nullptr) { wgpuSamplerRelease(this->remap_sampler); this->remap_sampler = nullptr; }
 
 	/* Atlas sampler. */
@@ -897,6 +898,7 @@ void GpuRenderer::EnsureRemapTable()
 	if (this->remap_table_built) return;
 	if (this->remap_table.Build()) {
 		this->remap_table_built = true;
+		_remap_table = &this->remap_table;
 	}
 }
 

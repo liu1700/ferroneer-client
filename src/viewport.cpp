@@ -1701,17 +1701,17 @@ static void EmitGpuSpriteCommand(SpriteID image, PaletteID pal,
 	float u0 = entry.u0, v0 = entry.v0, u1 = entry.u1, v1 = entry.v1;
 
 	if (sub != nullptr) {
-		/* SubSprite bounds are in screen pixels, relative to the sprite's
+		/* SubSprite bounds are in unzoomed sprite pixels, relative to the sprite's
 		 * draw position before x_offs/y_offs (i.e. relative to base_x/base_y).
-		 * The blitter in gfx.cpp multiplies by ZOOM_BASE to get unzoomed sprite
-		 * coords; here we work in screen pixels so use them directly. */
+		 * Scale them to screen space with UnScaleByZoom so clipping is correct
+		 * at all zoom levels. */
 		int base_x = vp->left + UnScaleByZoom(virt_x - vp->virtual_left, zoom);
 		int base_y = vp->top + UnScaleByZoom(virt_y - vp->virtual_top, zoom);
 
-		float clip_left   = static_cast<float>(std::max(base_x + sub->left,      screen_x));
-		float clip_top    = static_cast<float>(std::max(base_y + sub->top,        screen_y));
-		float clip_right  = static_cast<float>(std::min(base_x + sub->right + 1,  screen_x + static_cast<int>(entry.width)));
-		float clip_bottom = static_cast<float>(std::min(base_y + sub->bottom + 1, screen_y + static_cast<int>(entry.height)));
+		float clip_left   = static_cast<float>(std::max(base_x + UnScaleByZoom(sub->left, zoom),      screen_x));
+		float clip_top    = static_cast<float>(std::max(base_y + UnScaleByZoom(sub->top, zoom),        screen_y));
+		float clip_right  = static_cast<float>(std::min(base_x + UnScaleByZoom(sub->right + 1, zoom),  screen_x + static_cast<int>(entry.width)));
+		float clip_bottom = static_cast<float>(std::min(base_y + UnScaleByZoom(sub->bottom + 1, zoom), screen_y + static_cast<int>(entry.height)));
 
 		if (clip_right <= clip_left || clip_bottom <= clip_top) return;
 
@@ -2059,12 +2059,7 @@ void ViewportDoDraw(const Viewport &vp, int left, int top, int right, int bottom
 		_vd.parent_sprites_to_sort.push_back(&psd);
 	}
 
-#ifdef WITH_WGPU
-	if (_gpu_command_buffer == nullptr)
-#endif
-	{
-		_vp_sprite_sorter(&_vd.parent_sprites_to_sort);
-	}
+	_vp_sprite_sorter(&_vd.parent_sprites_to_sort);
 	ViewportDrawParentSprites(&_vd.parent_sprites_to_sort, &_vd.child_screen_sprites_to_draw, &_vd.dpi, &vp);
 
 	if (_draw_bounding_boxes) ViewportDrawBoundingBoxes(&_vd.parent_sprites_to_sort);

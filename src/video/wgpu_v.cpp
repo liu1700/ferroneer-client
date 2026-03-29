@@ -399,6 +399,27 @@ void VideoDriver_Wgpu::DestroyBlitResources()
 
 std::optional<std::string_view> VideoDriver_Wgpu::Start(const StringList &param)
 {
+	/* Start can be re-entered on the same driver instance during mode switches.
+	 * Tear down any stale GPU/window state first so no WGPU objects outlive
+	 * the device they were created from. */
+	_gpu_command_buffer = nullptr;
+	this->renderer.Shutdown();
+	this->DestroyBlitResources();
+	if (_sprite_atlas != nullptr) _sprite_atlas->Reset();
+	_sprite_atlas = nullptr;
+	_wgpu_device = nullptr;
+	this->gpu_device.Shutdown();
+#ifdef __APPLE__
+	if (this->metal_view != nullptr) {
+		SDL_Metal_DestroyView(this->metal_view);
+		this->metal_view = nullptr;
+	}
+#endif
+	if (this->sdl_window != nullptr) {
+		SDL_DestroyWindow(this->sdl_window);
+		this->sdl_window = nullptr;
+	}
+
 	this->UpdateAutoResolution();
 
 	/* Initialise SDL video subsystem. */
@@ -448,8 +469,12 @@ std::optional<std::string_view> VideoDriver_Wgpu::Start(const StringList &param)
 	native_layer = SDL_Metal_GetLayer(this->metal_view);
 #endif
 
+	int drawable_w = static_cast<int>(w);
+	int drawable_h = static_cast<int>(h);
+	this->GetDrawableSize(drawable_w, drawable_h);
+
 	/* Initialise the wgpu device. */
-	if (!this->gpu_device.Init(native_layer, static_cast<int>(w), static_cast<int>(h))) {
+	if (!this->gpu_device.Init(native_layer, drawable_w, drawable_h)) {
 #ifdef __APPLE__
 		SDL_Metal_DestroyView(this->metal_view);
 		this->metal_view = nullptr;
@@ -465,6 +490,7 @@ std::optional<std::string_view> VideoDriver_Wgpu::Start(const StringList &param)
 	/* Create the sprite atlas now that the GPU device is ready. */
 	static SpriteAtlas atlas_instance;
 	_sprite_atlas = &atlas_instance;
+	_sprite_atlas->Reset();
 
 	/* Temporary atlas smoke-test: upload a 64×64 red square. */
 	{
@@ -489,11 +515,25 @@ std::optional<std::string_view> VideoDriver_Wgpu::Start(const StringList &param)
 	/* Create GPU blit resources (intermediate texture + fullscreen pipeline). */
 	this->CreateBlitResources(static_cast<int>(w), static_cast<int>(h));
 
+	/* Initialise the GPU renderer (sprite pipeline + UI composite). */
+	if (!this->renderer.Init(&this->gpu_device)) {
+		Debug(driver, 0, "wgpu: GpuRenderer::Init() failed (non-fatal, UI blit still works)");
+	} else {
+		this->renderer.SetLogicalViewportSize(static_cast<int>(w), static_cast<int>(h));
+	}
+
+	/* Expose the global command buffer pointer for viewport hooks. */
+	_gpu_command_buffer = &this->command_buffer;
+
 	this->driver_info = "wgpu (WebGPU native)";
 
 	SDL_StopTextInput();
 	this->edit_box_focused = false;
-	this->is_game_threaded = !GetDriverParamBool(param, "no_threads") && !GetDriverParamBool(param, "no_thread");
+	/* The current WGPU path still touches sprite-loading / Cocoa-adjacent
+	 * code during draw preparation. Those paths are not safe from the
+	 * detached game thread on macOS, so force single-threaded operation
+	 * until the renderer is fully thread-safe. */
+	this->is_game_threaded = false;
 
 	/* Initialize blitter's internal buffers (e.g. anim_buf for 32bpp-anim). */
 	BlitterFactory::GetCurrentBlitter()->PostResize();
@@ -507,8 +547,12 @@ std::optional<std::string_view> VideoDriver_Wgpu::Start(const StringList &param)
 
 void VideoDriver_Wgpu::Stop()
 {
+	_gpu_command_buffer = nullptr;
+	this->renderer.Shutdown();
+
 	this->DestroyBlitResources();
 
+	if (_sprite_atlas != nullptr) _sprite_atlas->Reset();
 	_sprite_atlas = nullptr;
 	_wgpu_device = nullptr;
 	this->gpu_device.Shutdown();
@@ -548,6 +592,21 @@ void VideoDriver_Wgpu::MainLoop()
 void VideoDriver_Wgpu::RenderFrame()
 {
 	if (!this->gpu_device.IsReady()) return;
+
+	/* Use the GpuRenderer for the full frame if it's ready. */
+	if (this->renderer.BeginFrame()) {
+		this->renderer.SubmitSprites(this->command_buffer);
+		this->renderer.CompositeUI(this->video_buffer.data(), _screen.width, _screen.height);
+		this->renderer.Present();
+		this->command_buffer.Reset();
+		return;
+	}
+
+	/* BeginFrame failed — clear stale commands so they don't leak into
+	 * the next successful frame. */
+	this->command_buffer.Reset();
+
+	/* Fallback: old blit-only path (surface not ready or renderer not initialised). */
 	if (this->blit_pipeline == nullptr) return;
 
 	WGPUSurface surface = this->gpu_device.GetSurface();
@@ -665,6 +724,10 @@ void VideoDriver_Wgpu::RenderFrame()
 void VideoDriver_Wgpu::Paint()
 {
 	PerformanceMeasurer framerate(PFE_VIDEO);
+	this->command_buffer.Reset();
+	std::fill(this->video_buffer.begin(), this->video_buffer.end(), 0);
+	MarkWholeScreenDirty();
+	DrawDirtyBlocks();
 	this->RenderFrame();
 }
 
@@ -715,6 +778,8 @@ void VideoDriver_Wgpu::ResizeWindow(int w, int h)
 
 	this->DestroyBlitResources();
 	this->gpu_device.Resize(drawable_w, drawable_h);
+	this->renderer.Resize(drawable_w, drawable_h);
+	this->renderer.SetLogicalViewportSize(w, h);
 
 	this->video_buffer.assign(static_cast<size_t>(w) * h, 0);
 	this->anim_buffer.assign(static_cast<size_t>(w) * h, 0);

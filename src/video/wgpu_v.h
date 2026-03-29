@@ -14,6 +14,8 @@
 
 #include "video_driver.hpp"
 #include "../gpu/wgpu_device.h"
+#include "../gpu/gpu_renderer.h"
+#include "../gpu/sprite_command.h"
 #include <vector>
 
 struct SDL_Window;
@@ -55,6 +57,8 @@ private:
 	SDL_Window *sdl_window = nullptr;         ///< SDL2 window handle.
 	void *metal_view = nullptr;               ///< SDL_MetalView (macOS only).
 	WgpuDevice gpu_device;                    ///< Owned wgpu device/surface.
+	GpuRenderer renderer;                     ///< GPU sprite + UI composite renderer.
+	SpriteCommandBuffer command_buffer;       ///< Per-frame sprite draw commands.
 
 	std::vector<uint32_t> video_buffer;       ///< CPU-side pixel buffer for blitter/UI.
 	std::vector<uint8_t> anim_buffer;         ///< Animation buffer for 32bpp-anim blitter.

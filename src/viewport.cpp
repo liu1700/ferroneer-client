@@ -102,6 +102,12 @@
 #include "table/strings.h"
 #include "table/string_colours.h"
 
+#ifdef WITH_WGPU
+#include "gpu/sprite_command.h"
+#include "gpu/sprite_atlas.h"
+#include "gpu/remap_table.h"
+#endif
+
 #include "safeguards.h"
 
 Point _tile_fract_coords;
@@ -1616,8 +1622,102 @@ void ViewportSign::MarkDirty(ZoomLevel maxzoom) const
 	}
 }
 
-static void ViewportDrawTileSprites(const TileSpriteToDrawVector *tstdv)
+#ifdef WITH_WGPU
+/**
+ * Emit a GPU draw command for a single sprite.
+ * Converts virtual viewport coordinates to screen pixel coordinates and
+ * pushes an instance into the per-page command buffer.
+ */
+static void EmitGpuSpriteCommand(SpriteID image, PaletteID pal,
+	int virt_x, int virt_y, float z_depth,
+	const DrawPixelInfo *dpi, const Viewport *vp)
 {
+	if (_gpu_command_buffer == nullptr || _sprite_atlas == nullptr) return;
+
+	SpriteID sprite_id = image & SPRITE_MASK;
+	ZoomLevel zoom = dpi->zoom;
+
+	AtlasEntry entry = _sprite_atlas->Get(sprite_id, zoom);
+	if (!entry.valid) {
+		if (!SpriteExists(sprite_id) || GetSpriteType(sprite_id) != SpriteType::Normal) {
+			static uint32_t skipped_sprite_logs = 0;
+			if (skipped_sprite_logs < 16) {
+				Debug(driver, 1, "[gpu] skipping sprite {} with type {}", sprite_id, static_cast<int>(GetSpriteType(sprite_id)));
+				skipped_sprite_logs++;
+			}
+			return;
+		}
+
+		/* Lazy upload: trigger cache load which hooks the atlas upload. */
+		GetSprite(sprite_id, SpriteType::Normal);
+		entry = _sprite_atlas->Get(sprite_id, zoom);
+		if (!entry.valid) return;
+	}
+
+	/* Convert viewport virtual coordinates to absolute window pixels.
+	 * Use the viewport origin, not the current dirty-block DPI origin, or
+	 * sprites from different dirty blocks fold onto the left/top of screen. */
+	int screen_x = vp->left + UnScaleByZoom(virt_x - vp->virtual_left, zoom) + entry.x_offs;
+	int screen_y = vp->top + UnScaleByZoom(virt_y - vp->virtual_top, zoom) + entry.y_offs;
+
+	/* Determine render mode from palette flags. */
+	uint8_t mode = GPU_SPRITE_NORMAL;
+	uint8_t remap_idx = 0;
+
+	if (HasBit(image, PALETTE_MODIFIER_TRANSPARENT) || HasBit(pal, PALETTE_MODIFIER_TRANSPARENT)) {
+		mode = GPU_SPRITE_TRANSPARENT;
+	} else if (HasBit(pal, PALETTE_MODIFIER_COLOUR)) {
+		mode = GPU_SPRITE_REMAP;
+		SpriteID recolour_id = pal & SPRITE_MASK;
+		remap_idx = (_remap_table != nullptr) ? _remap_table->GetRowIndex(recolour_id) : 0;
+	}
+
+	/* Determine tint colour and alpha for building preview / tile selection palettes. */
+	float tint_r = 1.0f, tint_g = 1.0f, tint_b = 1.0f;
+	uint8_t alpha = 255;
+
+	PaletteID pal_stripped = pal & ~(PALETTE_MODIFIER_TRANSPARENT | PALETTE_MODIFIER_COLOUR);
+	if (pal_stripped == PALETTE_SEL_TILE_RED || pal_stripped == PALETTE_TO_STRUCT_RED) {
+		/* Invalid placement — red ghost. */
+		tint_r = 1.0f; tint_g = 0.5f; tint_b = 0.5f;
+		alpha = 180;
+	} else if (pal_stripped == PALETTE_SEL_TILE_BLUE || pal_stripped == PALETTE_TO_STRUCT_BLUE) {
+		/* Valid placement / catchment area — green/blue ghost. */
+		tint_r = 0.5f; tint_g = 1.0f; tint_b = 0.5f;
+		alpha = 180;
+	} else if (pal_stripped == PALETTE_TO_STRUCT_GREEN) {
+		/* Valid placement green (e.g. bridge) — green ghost. */
+		tint_r = 0.5f; tint_g = 1.0f; tint_b = 0.5f;
+		alpha = 180;
+	}
+
+	_gpu_command_buffer->Emit(entry.page, GpuSpriteInstance{
+		{static_cast<float>(screen_x), static_cast<float>(screen_y)},
+		{static_cast<float>(entry.width), static_cast<float>(entry.height)},
+		{entry.u0, entry.v0},
+		{entry.u1, entry.v1},
+		z_depth,
+		PackModeRemap(mode, remap_idx, alpha),
+		{tint_r, tint_g, tint_b},
+	});
+}
+#endif
+
+static void ViewportDrawTileSprites(const TileSpriteToDrawVector *tstdv,
+	const DrawPixelInfo *dpi, const Viewport *vp)
+{
+#ifdef WITH_WGPU
+	if (_gpu_command_buffer != nullptr) {
+		int count = static_cast<int>(tstdv->size());
+		int idx = 0;
+		for (const TileSpriteToDraw &ts : *tstdv) {
+			float z_depth = 0.999f - 0.499f * (static_cast<float>(idx) / std::max(count, 1));
+			EmitGpuSpriteCommand(ts.image, ts.pal, ts.x, ts.y, z_depth, dpi, vp);
+			idx++;
+		}
+		return;
+	}
+#endif
 	for (const TileSpriteToDraw &ts : *tstdv) {
 		DrawSpriteViewport(ts.image, ts.pal, ts.x, ts.y, ts.sub);
 	}
@@ -1747,8 +1847,42 @@ static void ViewportSortParentSprites(ParentSpriteToSortVector *psdv)
 }
 
 
-static void ViewportDrawParentSprites(const ParentSpriteToSortVector *psd, const ChildScreenSpriteToDrawVector *csstdv)
+static void ViewportDrawParentSprites(const ParentSpriteToSortVector *psd,
+	const ChildScreenSpriteToDrawVector *csstdv,
+	const DrawPixelInfo *dpi, const Viewport *vp)
 {
+#ifdef WITH_WGPU
+	if (_gpu_command_buffer != nullptr) {
+		int sorted_count = static_cast<int>(psd->size());
+		int idx = 0;
+		for (const ParentSpriteToDraw *ps : *psd) {
+			float z_depth = 0.499f - 0.498f * (static_cast<float>(idx) / std::max(sorted_count, 1));
+			float child_z = z_depth - 0.0001f;
+
+			if (ps->image != SPR_EMPTY_BOUNDING_BOX) {
+				EmitGpuSpriteCommand(ps->image, ps->pal, ps->x, ps->y, z_depth, dpi, vp);
+			}
+
+			int child_idx = ps->first_child;
+			while (child_idx >= 0) {
+				const ChildScreenSpriteToDraw *cs = &(*csstdv)[child_idx];
+				child_idx = cs->next;
+				int cx, cy;
+				if (cs->relative) {
+					cx = ps->left + cs->x;
+					cy = ps->top + cs->y;
+				} else {
+					cx = ps->x + cs->x;
+					cy = ps->y + cs->y;
+				}
+				EmitGpuSpriteCommand(cs->image, cs->pal, cx, cy, child_z, dpi, vp);
+				child_z -= 0.00001f;
+			}
+			idx++;
+		}
+		return;
+	}
+#endif
 	for (const ParentSpriteToDraw *ps : *psd) {
 		if (ps->image != SPR_EMPTY_BOUNDING_BOX) DrawSpriteViewport(ps->image, ps->pal, ps->x, ps->y, ps->sub);
 
@@ -1869,14 +2003,14 @@ void ViewportDoDraw(const Viewport &vp, int left, int top, int right, int bottom
 
 	DrawTextEffects(&_vd.dpi);
 
-	if (!_vd.tile_sprites_to_draw.empty()) ViewportDrawTileSprites(&_vd.tile_sprites_to_draw);
+	if (!_vd.tile_sprites_to_draw.empty()) ViewportDrawTileSprites(&_vd.tile_sprites_to_draw, &_vd.dpi, &vp);
 
 	for (auto &psd : _vd.parent_sprites_to_draw) {
 		_vd.parent_sprites_to_sort.push_back(&psd);
 	}
 
 	_vp_sprite_sorter(&_vd.parent_sprites_to_sort);
-	ViewportDrawParentSprites(&_vd.parent_sprites_to_sort, &_vd.child_screen_sprites_to_draw);
+	ViewportDrawParentSprites(&_vd.parent_sprites_to_sort, &_vd.child_screen_sprites_to_draw, &_vd.dpi, &vp);
 
 	if (_draw_bounding_boxes) ViewportDrawBoundingBoxes(&_vd.parent_sprites_to_sort);
 	if (_draw_dirty_blocks) ViewportDrawDirtyBlocks();

@@ -93,7 +93,6 @@
 
 #include <forward_list>
 #include <stack>
-#include <unordered_set>
 
 #include "widgets/vehicle_widget.h"
 
@@ -1622,29 +1621,6 @@ void ViewportSign::MarkDirty(ZoomLevel maxzoom) const
 }
 
 #ifdef WITH_WGPU
-/* --- GPU diagnostic counters (temporary) --- */
-static uint32_t _gpu_diag_emit_total = 0;
-static uint32_t _gpu_diag_emit_unique = 0;
-static uint32_t _gpu_diag_viewport_draws = 0;
-static std::unordered_set<uint64_t> _gpu_diag_seen;
-
-void GpuDiagResetFrame()
-{
-	_gpu_diag_emit_total = 0;
-	_gpu_diag_emit_unique = 0;
-	_gpu_diag_viewport_draws = 0;
-	_gpu_diag_seen.clear();
-}
-
-void GpuDiagLogFrame(uint32_t frame_num)
-{
-	if (frame_num % 120 != 0) return;
-	Debug(driver, 0,
-		"[gpu][diag] frame={} viewport_draws={} emit_total={} emit_unique={} duplicates={}",
-		frame_num, _gpu_diag_viewport_draws, _gpu_diag_emit_total, _gpu_diag_emit_unique,
-		_gpu_diag_emit_total - _gpu_diag_emit_unique);
-}
-
 /**
  * Emit a GPU draw command for a single sprite.
  * Converts virtual viewport coordinates to screen pixel coordinates and
@@ -1659,14 +1635,6 @@ static void EmitGpuSpriteCommand(SpriteID image, PaletteID pal,
 	if (_gpu_suppress_sprite_emit) return;
 
 	SpriteID sprite_id = image & SPRITE_MASK;
-
-	_gpu_diag_emit_total++;
-	uint64_t diag_key = (static_cast<uint64_t>(sprite_id) << 40)
-	                   | (static_cast<uint64_t>(static_cast<uint32_t>(virt_x) & 0xFFFFF) << 20)
-	                   | static_cast<uint64_t>(static_cast<uint32_t>(virt_y) & 0xFFFFF);
-	if (_gpu_diag_seen.insert(diag_key).second) {
-		_gpu_diag_emit_unique++;
-	}
 
 	ZoomLevel zoom = dpi->zoom;
 
@@ -2048,9 +2016,6 @@ static void ViewportDrawStrings(ZoomLevel zoom, const StringSpriteToDrawVector *
 
 void ViewportDoDraw(const Viewport &vp, int left, int top, int right, int bottom)
 {
-#ifdef WITH_WGPU
-	if (_gpu_command_buffer != nullptr) _gpu_diag_viewport_draws++;
-#endif
 	_vd.dpi.zoom = vp.zoom;
 	int mask = ScaleByZoom(-1, vp.zoom);
 

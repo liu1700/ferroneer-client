@@ -712,11 +712,6 @@ void VideoDriver_Wgpu::RenderFrame()
 	wgpuTextureRelease(surface_texture.texture);
 }
 
-#ifdef WITH_WGPU
-extern void GpuDiagResetFrame();
-extern void GpuDiagLogFrame(uint32_t frame_num);
-#endif
-
 void VideoDriver_Wgpu::Paint()
 {
 	PerformanceMeasurer framerate(PFE_VIDEO);
@@ -725,9 +720,6 @@ void VideoDriver_Wgpu::Paint()
 	std::fill(this->video_buffer.begin(), this->video_buffer.end(), 0);
 
 #ifdef WITH_WGPU
-	static uint32_t gpu_frame_counter = 0;
-	GpuDiagResetFrame();
-
 	/* Phase 1 — GPU sprites: draw each viewport in a single pass so every
 	 * sprite is collected once, sorted once, and emitted once with a
 	 * globally consistent z_depth.  This eliminates per-dirty-block
@@ -761,7 +753,6 @@ void VideoDriver_Wgpu::Paint()
 
 #ifdef WITH_WGPU
 	_gpu_suppress_sprite_emit = false;
-	GpuDiagLogFrame(gpu_frame_counter++);
 #endif
 
 	this->RenderFrame();

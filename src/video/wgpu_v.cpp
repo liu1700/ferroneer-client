@@ -234,6 +234,8 @@ std::optional<std::string_view> VideoDriver_Wgpu::Start(const StringList &param)
 	this->edit_box_focused = false;
 	this->is_game_threaded = !GetDriverParamBool(param, "no_threads") && !GetDriverParamBool(param, "no_thread");
 
+	/* Initialize dirty block array before marking screen dirty. */
+	ScreenSizeChanged();
 	MarkWholeScreenDirty();
 
 	return std::nullopt;

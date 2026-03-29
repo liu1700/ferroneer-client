@@ -1163,11 +1163,8 @@ draw_inner:
 
 						SpriteID timg = image;
 						SetBit(timg, PALETTE_MODIFIER_TRANSPARENT);
-						AddTileSpriteToDraw(timg, PALETTE_TO_TRANSPARENT,
-							ti->x + dtss.origin.x, ti->y + dtss.origin.y, ti->z + dtss.origin.z);
-						AddTileSpriteToDraw(timg, PALETTE_TO_TRANSPARENT,
-							ti->x + dtss.origin.x, ti->y + dtss.origin.y, ti->z + dtss.origin.z);
-						AddTileSpriteToDraw(timg, PALETTE_TO_TRANSPARENT,
+						PaletteID preview_pal = _thd.make_square_red ? PALETTE_TO_STRUCT_RED : PALETTE_TO_STRUCT_BLUE;
+						AddTileSpriteToDraw(timg, preview_pal,
 							ti->x + dtss.origin.x, ti->y + dtss.origin.y, ti->z + dtss.origin.z);
 					}
 				}
@@ -1663,32 +1660,25 @@ static void EmitGpuSpriteCommand(SpriteID image, PaletteID pal,
 	/* Determine render mode from palette flags. */
 	uint8_t mode = GPU_SPRITE_NORMAL;
 	uint8_t remap_idx = 0;
+	float tint_r = 1.0f, tint_g = 1.0f, tint_b = 1.0f;
+	uint8_t alpha = 255;
 
-	if (HasBit(image, PALETTE_MODIFIER_TRANSPARENT) || HasBit(pal, PALETTE_MODIFIER_TRANSPARENT)) {
+	/* Check for building preview / selection struct palettes FIRST.
+	 * These take priority over transparent mode to avoid double-darkening. */
+	PaletteID pal_stripped = pal & ~(PALETTE_MODIFIER_TRANSPARENT | PALETTE_MODIFIER_COLOUR);
+	if (pal_stripped == PALETTE_SEL_TILE_RED || pal_stripped == PALETTE_TO_STRUCT_RED) {
+		tint_r = 1.0f; tint_g = 0.4f; tint_b = 0.4f;
+		alpha = 160;
+	} else if (pal_stripped == PALETTE_SEL_TILE_BLUE || pal_stripped == PALETTE_TO_STRUCT_BLUE
+	        || pal_stripped == PALETTE_TO_STRUCT_GREEN) {
+		tint_r = 0.4f; tint_g = 1.0f; tint_b = 0.4f;
+		alpha = 160;
+	} else if (HasBit(image, PALETTE_MODIFIER_TRANSPARENT) || HasBit(pal, PALETTE_MODIFIER_TRANSPARENT)) {
 		mode = GPU_SPRITE_TRANSPARENT;
 	} else if (HasBit(pal, PALETTE_MODIFIER_COLOUR)) {
 		mode = GPU_SPRITE_REMAP;
 		SpriteID recolour_id = pal & SPRITE_MASK;
 		remap_idx = (_remap_table != nullptr) ? _remap_table->GetRowIndex(recolour_id) : 0;
-	}
-
-	/* Determine tint colour and alpha for building preview / tile selection palettes. */
-	float tint_r = 1.0f, tint_g = 1.0f, tint_b = 1.0f;
-	uint8_t alpha = 255;
-
-	PaletteID pal_stripped = pal & ~(PALETTE_MODIFIER_TRANSPARENT | PALETTE_MODIFIER_COLOUR);
-	if (pal_stripped == PALETTE_SEL_TILE_RED || pal_stripped == PALETTE_TO_STRUCT_RED) {
-		/* Invalid placement — red ghost. */
-		tint_r = 1.0f; tint_g = 0.5f; tint_b = 0.5f;
-		alpha = 180;
-	} else if (pal_stripped == PALETTE_SEL_TILE_BLUE || pal_stripped == PALETTE_TO_STRUCT_BLUE) {
-		/* Valid placement / catchment area — green/blue ghost. */
-		tint_r = 0.5f; tint_g = 1.0f; tint_b = 0.5f;
-		alpha = 180;
-	} else if (pal_stripped == PALETTE_TO_STRUCT_GREEN) {
-		/* Valid placement green (e.g. bridge) — green ghost. */
-		tint_r = 0.5f; tint_g = 1.0f; tint_b = 0.5f;
-		alpha = 180;
 	}
 
 	_gpu_command_buffer->Emit(entry.page, GpuSpriteInstance{

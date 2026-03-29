@@ -23,6 +23,11 @@
 #include "table/sprites.h"
 #include "table/palette_convert.h"
 
+#ifdef WITH_WGPU
+#include "gpu/sprite_atlas.h"
+#include "palette_func.h"
+#endif
+
 #include "safeguards.h"
 
 /** Default of 4MB spritecache. */
@@ -531,6 +536,41 @@ static void *ReadSprite(const SpriteCache *sc, SpriteID id, SpriteType sprite_ty
 		sprite[ZoomLevel::Min] = sprite[_font_zoom];
 	}
 
+#ifdef WITH_WGPU
+	/* Upload decoded sprite data to the GPU atlas before the blitter encodes it. */
+	if (_sprite_atlas != nullptr && sprite_type == SpriteType::Normal) {
+		for (ZoomLevel zoom : sprite_avail) {
+			const SpriteLoader::Sprite &src = sprite[zoom];
+			if (src.width == 0 || src.height == 0 || src.data == nullptr) continue;
+
+			uint32_t pixel_count = static_cast<uint32_t>(src.width) * src.height;
+			std::vector<uint8_t> rgba(pixel_count * 4);
+			std::vector<uint8_t> m_data(pixel_count);
+			bool has_rgb = src.colours.Test(SpriteComponent::RGB);
+
+			for (uint32_t i = 0; i < pixel_count; i++) {
+				const SpriteLoader::CommonPixel &px = src.data[i];
+				if (has_rgb) {
+					rgba[i * 4 + 0] = px.r;
+					rgba[i * 4 + 1] = px.g;
+					rgba[i * 4 + 2] = px.b;
+				} else {
+					/* Palette-only (8bpp): convert palette index to RGB. */
+					Colour c = _cur_palette.palette[px.m];
+					rgba[i * 4 + 0] = c.r;
+					rgba[i * 4 + 1] = c.g;
+					rgba[i * 4 + 2] = c.b;
+				}
+				rgba[i * 4 + 3] = px.a;
+				m_data[i] = px.m;
+			}
+
+			_sprite_atlas->Upload(id, rgba.data(), m_data.data(),
+				src.width, src.height, src.x_offs, src.y_offs, zoom);
+		}
+	}
+#endif
+
 	return encoder->Encode(sprite_type, sprite, allocator);
 }
 
@@ -785,6 +825,12 @@ void IncreaseSpriteLRU()
 
 void SpriteCache::ClearSpriteData()
 {
+#ifdef WITH_WGPU
+	if (_sprite_atlas != nullptr) {
+		SpriteID sprite_id = static_cast<SpriteID>(this - _spritecache.data());
+		_sprite_atlas->Evict(sprite_id);
+	}
+#endif
 	_spritecache_bytes_used -= this->length;
 	this->ptr.reset();
 }

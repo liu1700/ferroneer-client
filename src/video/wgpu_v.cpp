@@ -24,6 +24,7 @@
 #include "../window_gui.h"
 #include "wgpu_v.h"
 #include "../gpu/sprite_atlas.h"
+#include "../spritecache.h"
 #include "../gpu/sprite_command.h"
 #include <SDL.h>
 #ifdef __APPLE__
@@ -495,6 +496,10 @@ std::optional<std::string_view> VideoDriver_Wgpu::Start(const StringList &param)
 	_sprite_atlas = &atlas_instance;
 	_sprite_atlas->Reset();
 
+	/* Sprites decoded before the atlas existed have no atlas entries.
+	 * The sprite cache is cleared on the first Paint() call (after all
+	 * subsystems are initialized) to force re-decode with atlas upload. */
+
 	/* Allocate CPU-side pixel buffer for the blitter / UI layer. */
 	this->video_buffer.assign(static_cast<size_t>(w) * h, 0);
 	this->anim_buffer.assign(static_cast<size_t>(w) * h, 0);
@@ -720,6 +725,14 @@ void VideoDriver_Wgpu::Paint()
 	std::fill(this->video_buffer.begin(), this->video_buffer.end(), 0);
 
 #ifdef WITH_WGPU
+	/* On first frame, flush sprites cached before the atlas existed so they
+	 * get re-decoded (triggering atlas upload) on next access. */
+	static bool sprite_cache_cleared = false;
+	if (!sprite_cache_cleared && _sprite_atlas != nullptr) {
+		GfxClearSpriteCache();
+		sprite_cache_cleared = true;
+	}
+
 	/* Phase 1 — GPU sprites: draw each viewport in a single pass so every
 	 * sprite is collected once, sorted once, and emitted once with a
 	 * globally consistent z_depth.  This eliminates per-dirty-block

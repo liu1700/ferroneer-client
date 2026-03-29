@@ -46,6 +46,9 @@ public:
 	SpriteAtlas();
 	~SpriteAtlas();
 
+	/** Release all GPU textures and forget packed entries. */
+	void Reset();
+
 	/**
 	 * Upload a decoded sprite to the atlas.
 	 * @param id     Sprite ID.

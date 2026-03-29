@@ -467,6 +467,13 @@ void GpuRenderer::Resize(int width, int height)
 	Debug(driver, 1, "[gpu_renderer] Resize to {}x{}", width, height);
 }
 
+void GpuRenderer::SetLogicalViewportSize(int width, int height)
+{
+	if (this->dev == nullptr) return;
+	this->UpdateViewportUniform(width, height);
+	Debug(driver, 1, "[gpu_renderer] Logical viewport {}x{}", width, height);
+}
+
 /* -------------------------------------------------------------------------
  * BeginFrame — acquire surface, create encoder
  * -------------------------------------------------------------------------*/

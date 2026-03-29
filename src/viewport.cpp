@@ -1639,15 +1639,26 @@ static void EmitGpuSpriteCommand(SpriteID image, PaletteID pal,
 
 	AtlasEntry entry = _sprite_atlas->Get(sprite_id, zoom);
 	if (!entry.valid) {
+		if (!SpriteExists(sprite_id) || GetSpriteType(sprite_id) != SpriteType::Normal) {
+			static uint32_t skipped_sprite_logs = 0;
+			if (skipped_sprite_logs < 16) {
+				Debug(driver, 1, "[gpu] skipping sprite {} with type {}", sprite_id, static_cast<int>(GetSpriteType(sprite_id)));
+				skipped_sprite_logs++;
+			}
+			return;
+		}
+
 		/* Lazy upload: trigger cache load which hooks the atlas upload. */
 		GetSprite(sprite_id, SpriteType::Normal);
 		entry = _sprite_atlas->Get(sprite_id, zoom);
 		if (!entry.valid) return;
 	}
 
-	/* Convert virtual viewport coords to window pixel coords. */
-	int screen_x = vp->left + UnScaleByZoom(virt_x - dpi->left, zoom) + entry.x_offs;
-	int screen_y = vp->top + UnScaleByZoom(virt_y - dpi->top, zoom) + entry.y_offs;
+	/* Convert viewport virtual coordinates to absolute window pixels.
+	 * Use the viewport origin, not the current dirty-block DPI origin, or
+	 * sprites from different dirty blocks fold onto the left/top of screen. */
+	int screen_x = vp->left + UnScaleByZoom(virt_x - vp->virtual_left, zoom) + entry.x_offs;
+	int screen_y = vp->top + UnScaleByZoom(virt_y - vp->virtual_top, zoom) + entry.y_offs;
 
 	/* Determine render mode from palette flags. */
 	uint8_t mode = GPU_SPRITE_NORMAL;

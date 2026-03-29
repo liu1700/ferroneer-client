@@ -38,6 +38,9 @@ public:
 	/** Recreate size-dependent resources (depth buffer, viewport uniforms, UI texture). */
 	void Resize(int width, int height);
 
+	/** Update sprite coordinate mapping using logical screen dimensions. */
+	void SetLogicalViewportSize(int width, int height);
+
 	/** Acquire the next surface texture and create the command encoder. */
 	bool BeginFrame();
 

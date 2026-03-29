@@ -25,6 +25,11 @@ SpriteAtlas::SpriteAtlas() = default;
 
 SpriteAtlas::~SpriteAtlas()
 {
+	this->Reset();
+}
+
+void SpriteAtlas::Reset()
+{
 	for (auto &page : this->pages) {
 		if (page.rgba_texture != nullptr) {
 			wgpuTextureRelease(page.rgba_texture);
@@ -35,6 +40,9 @@ SpriteAtlas::~SpriteAtlas()
 			page.m_texture = nullptr;
 		}
 	}
+
+	this->pages.clear();
+	this->entries.clear();
 }
 
 uint16_t SpriteAtlas::AllocatePage()

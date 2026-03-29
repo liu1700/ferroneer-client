@@ -492,18 +492,6 @@ std::optional<std::string_view> VideoDriver_Wgpu::Start(const StringList &param)
 	_sprite_atlas = &atlas_instance;
 	_sprite_atlas->Reset();
 
-	/* Temporary atlas smoke-test: upload a 64×64 red square. */
-	{
-		std::vector<uint8_t> test_rgba(64 * 64 * 4, 0);
-		for (size_t i = 0; i < test_rgba.size(); i += 4) {
-			test_rgba[i]     = 255; /* R */
-			test_rgba[i + 3] = 255; /* A */
-		}
-		AtlasEntry e = _sprite_atlas->Upload(0, test_rgba.data(), nullptr, 64, 64, 0, 0, ZoomLevel::Normal);
-		Debug(driver, 0, "atlas test: page={} uv=({:.5f},{:.5f})..({:.5f},{:.5f}) valid={}",
-			e.page, e.u0, e.v0, e.u1, e.v1, e.valid ? 1 : 0);
-	}
-
 	/* Allocate CPU-side pixel buffer for the blitter / UI layer. */
 	this->video_buffer.assign(static_cast<size_t>(w) * h, 0);
 	this->anim_buffer.assign(static_cast<size_t>(w) * h, 0);
@@ -721,13 +709,29 @@ void VideoDriver_Wgpu::RenderFrame()
 	wgpuTextureRelease(surface_texture.texture);
 }
 
+#ifdef WITH_WGPU
+extern void GpuDiagResetFrame();
+extern void GpuDiagLogFrame(uint32_t frame_num);
+#endif
+
 void VideoDriver_Wgpu::Paint()
 {
 	PerformanceMeasurer framerate(PFE_VIDEO);
+
+#ifdef WITH_WGPU
+	static uint32_t gpu_frame_counter = 0;
+	GpuDiagResetFrame();
+#endif
+
 	this->command_buffer.Reset();
 	std::fill(this->video_buffer.begin(), this->video_buffer.end(), 0);
 	MarkWholeScreenDirty();
 	DrawDirtyBlocks();
+
+#ifdef WITH_WGPU
+	GpuDiagLogFrame(gpu_frame_counter++);
+#endif
+
 	this->RenderFrame();
 }
 

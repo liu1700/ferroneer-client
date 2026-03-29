@@ -93,6 +93,7 @@
 
 #include <forward_list>
 #include <stack>
+#include <unordered_set>
 
 #include "widgets/vehicle_widget.h"
 
@@ -106,6 +107,7 @@
 #include "gpu/sprite_command.h"
 #include "gpu/sprite_atlas.h"
 #include "gpu/remap_table.h"
+#include "spritecache.h"
 #endif
 
 #include "safeguards.h"
@@ -137,11 +139,6 @@ struct TileSpriteToDraw {
 	const SubSprite *sub;           ///< only draw a rectangular part of the sprite
 	int32_t x;                        ///< screen X coordinate of sprite
 	int32_t y;                        ///< screen Y coordinate of sprite
-#ifdef WITH_WGPU
-	int32_t world_x;
-	int32_t world_y;
-	int32_t world_z;
-#endif
 };
 
 struct ChildScreenSpriteToDraw {
@@ -529,11 +526,6 @@ static void AddTileSpriteToDraw(SpriteID image, PaletteID pal, int32_t x, int32_
 	Point pt = RemapCoords(x, y, z);
 	ts.x = pt.x + extra_offs_x;
 	ts.y = pt.y + extra_offs_y;
-#ifdef WITH_WGPU
-	ts.world_x = x;
-	ts.world_y = y;
-	ts.world_z = z;
-#endif
 }
 
 /**
@@ -1630,29 +1622,27 @@ void ViewportSign::MarkDirty(ZoomLevel maxzoom) const
 }
 
 #ifdef WITH_WGPU
-/**
- * Compute GPU depth from world-space bounding box.
- * Uses the same metric as the CPU sprite sorter: sum of all bbox coordinates.
- * Larger sum = closer to camera = smaller depth value (LESS depth test).
- */
-static float ComputeWorldZDepth(int xmin, int xmax, int ymin, int ymax, int zmin, int zmax)
+/* --- GPU diagnostic counters (temporary) --- */
+static uint32_t _gpu_diag_emit_total = 0;
+static uint32_t _gpu_diag_emit_unique = 0;
+static uint32_t _gpu_diag_viewport_draws = 0;
+static std::unordered_set<uint64_t> _gpu_diag_seen;
+
+void GpuDiagResetFrame()
 {
-	double sum = static_cast<double>(xmin) + xmax + ymin + ymax + zmin + zmax;
-	constexpr double MAX_SUM = 500000.0;
-	double normalized = std::clamp(sum / MAX_SUM, 0.0, 1.0);
-	return static_cast<float>(0.49 - normalized * 0.48 + 0.01);
+	_gpu_diag_emit_total = 0;
+	_gpu_diag_emit_unique = 0;
+	_gpu_diag_viewport_draws = 0;
+	_gpu_diag_seen.clear();
 }
 
-/**
- * Compute GPU depth for a tile sprite from its world position.
- * Tile sprites use range [0.50, 0.99] — behind all parent sprites.
- */
-static float ComputeTileZDepth(int world_x, int world_y, int world_z)
+void GpuDiagLogFrame(uint32_t frame_num)
 {
-	double sum = static_cast<double>(world_x) * 2 + static_cast<double>(world_y) * 2 + world_z * 2;
-	constexpr double MAX_SUM = 500000.0;
-	double normalized = std::clamp(sum / MAX_SUM, 0.0, 1.0);
-	return static_cast<float>(0.99 - normalized * 0.48);
+	if (frame_num % 120 != 0) return;
+	Debug(driver, 0,
+		"[gpu][diag] frame={} viewport_draws={} emit_total={} emit_unique={} duplicates={}",
+		frame_num, _gpu_diag_viewport_draws, _gpu_diag_emit_total, _gpu_diag_emit_unique,
+		_gpu_diag_emit_total - _gpu_diag_emit_unique);
 }
 
 /**
@@ -1668,10 +1658,26 @@ static void EmitGpuSpriteCommand(SpriteID image, PaletteID pal,
 	if (_gpu_command_buffer == nullptr || _sprite_atlas == nullptr) return;
 
 	SpriteID sprite_id = image & SPRITE_MASK;
+
+	_gpu_diag_emit_total++;
+	uint64_t diag_key = (static_cast<uint64_t>(sprite_id) << 40)
+	                   | (static_cast<uint64_t>(static_cast<uint32_t>(virt_x) & 0xFFFFF) << 20)
+	                   | static_cast<uint64_t>(static_cast<uint32_t>(virt_y) & 0xFFFFF);
+	if (_gpu_diag_seen.insert(diag_key).second) {
+		_gpu_diag_emit_unique++;
+	}
+
 	ZoomLevel zoom = dpi->zoom;
 
-	AtlasEntry entry = _sprite_atlas->Get(sprite_id, zoom);
+	AtlasEntry entry = _sprite_atlas->Get(sprite_id, ZoomLevel::Min);
 	if (!entry.valid) {
+		static uint32_t atlas_reload_logs = 0;
+		if (atlas_reload_logs < 128) {
+			Debug(driver, 1, "[gpu][viewport] atlas reload sprite={} zoom={} image={} pal={}",
+				sprite_id, static_cast<int>(zoom), image, pal);
+			atlas_reload_logs++;
+		}
+
 		if (!SpriteExists(sprite_id) || GetSpriteType(sprite_id) != SpriteType::Normal) {
 			static uint32_t skipped_sprite_logs = 0;
 			if (skipped_sprite_logs < 16) {
@@ -1681,37 +1687,44 @@ static void EmitGpuSpriteCommand(SpriteID image, PaletteID pal,
 			return;
 		}
 
-		/* Lazy upload: trigger cache load which hooks the atlas upload. */
-		GetSprite(sprite_id, SpriteType::Normal);
-		entry = _sprite_atlas->Get(sprite_id, zoom);
-		if (!entry.valid) return;
+		/* Lazy upload: request the missing zoom variant specifically, then force
+		 * a decode pass so spritecache uploads that generated zoom into the atlas
+		 * without pre-filling every zoom level. */
+		UniquePtrSpriteAllocator atlas_upload_allocator;
+		GetRawSprite(sprite_id, SpriteType::Normal, &atlas_upload_allocator, nullptr);
+		entry = _sprite_atlas->Get(sprite_id, ZoomLevel::Min);
+		if (!entry.valid) {
+			static uint32_t atlas_reload_fail_logs = 0;
+			if (atlas_reload_fail_logs < 128) {
+				Debug(driver, 0, "[gpu][viewport] atlas reload failed sprite={} zoom={} image={} pal={}",
+					sprite_id, static_cast<int>(zoom), image, pal);
+				atlas_reload_fail_logs++;
+			}
+			return;
+		}
 	}
 
 	/* Convert viewport virtual coordinates to absolute window pixels.
 	 * Use the viewport origin, not the current dirty-block DPI origin, or
 	 * sprites from different dirty blocks fold onto the left/top of screen. */
-	int screen_x = vp->left + UnScaleByZoom(virt_x - vp->virtual_left, zoom) + entry.x_offs;
-	int screen_y = vp->top + UnScaleByZoom(virt_y - vp->virtual_top, zoom) + entry.y_offs;
+	int screen_x = vp->left + UnScaleByZoom(virt_x - vp->virtual_left, zoom) + UnScaleByZoom(entry.x_offs, zoom);
+	int screen_y = vp->top + UnScaleByZoom(virt_y - vp->virtual_top, zoom) + UnScaleByZoom(entry.y_offs, zoom);
 
 	/* Set up draw rect and UV coords; SubSprite clipping may narrow these. */
 	float draw_x = static_cast<float>(screen_x);
 	float draw_y = static_cast<float>(screen_y);
-	float draw_w = static_cast<float>(entry.width);
-	float draw_h = static_cast<float>(entry.height);
+	float draw_w = static_cast<float>(UnScaleByZoom(entry.width, zoom));
+	float draw_h = static_cast<float>(UnScaleByZoom(entry.height, zoom));
 	float u0 = entry.u0, v0 = entry.v0, u1 = entry.u1, v1 = entry.v1;
 
 	if (sub != nullptr) {
-		/* SubSprite bounds are in unzoomed sprite pixels, relative to the sprite's
-		 * draw position before x_offs/y_offs (i.e. relative to base_x/base_y).
-		 * Scale them to screen space with UnScaleByZoom so clipping is correct
-		 * at all zoom levels. */
-		int base_x = vp->left + UnScaleByZoom(virt_x - vp->virtual_left, zoom);
-		int base_y = vp->top + UnScaleByZoom(virt_y - vp->virtual_top, zoom);
-
-		float clip_left   = static_cast<float>(std::max(base_x + UnScaleByZoom(sub->left, zoom),      screen_x));
-		float clip_top    = static_cast<float>(std::max(base_y + UnScaleByZoom(sub->top, zoom),        screen_y));
-		float clip_right  = static_cast<float>(std::min(base_x + UnScaleByZoom(sub->right + 1, zoom),  screen_x + static_cast<int>(entry.width)));
-		float clip_bottom = static_cast<float>(std::min(base_y + UnScaleByZoom(sub->bottom + 1, zoom), screen_y + static_cast<int>(entry.height)));
+		/* SubSprite bounds are relative to the sprite draw origin after sprite
+		 * offsets are applied. Mirror the CPU blitter semantics so clipped GPU
+		 * sprites use the same visible rectangle. */
+		float clip_left   = static_cast<float>(std::max(screen_x + UnScaleByZoom(sub->left, zoom),      screen_x));
+		float clip_top    = static_cast<float>(std::max(screen_y + UnScaleByZoom(sub->top, zoom),       screen_y));
+		float clip_right  = static_cast<float>(std::min(screen_x + UnScaleByZoom(sub->right + 1, zoom), screen_x + static_cast<int>(draw_w)));
+		float clip_bottom = static_cast<float>(std::min(screen_y + UnScaleByZoom(sub->bottom + 1, zoom), screen_y + static_cast<int>(draw_h)));
 
 		if (clip_right <= clip_left || clip_bottom <= clip_top) return;
 
@@ -1770,9 +1783,12 @@ static void ViewportDrawTileSprites(const TileSpriteToDrawVector *tstdv,
 {
 #ifdef WITH_WGPU
 	if (_gpu_command_buffer != nullptr) {
+		int count = static_cast<int>(tstdv->size());
+		int idx = 0;
 		for (const TileSpriteToDraw &ts : *tstdv) {
-			float z_depth = ComputeTileZDepth(ts.world_x, ts.world_y, ts.world_z);
+			float z_depth = 0.999f - 0.499f * (static_cast<float>(idx) / std::max(count, 1));
 			EmitGpuSpriteCommand(ts.image, ts.pal, ts.x, ts.y, z_depth, dpi, vp, ts.sub);
+			idx++;
 		}
 		return;
 	}
@@ -1912,8 +1928,10 @@ static void ViewportDrawParentSprites(const ParentSpriteToSortVector *psd,
 {
 #ifdef WITH_WGPU
 	if (_gpu_command_buffer != nullptr) {
+		int sorted_count = static_cast<int>(psd->size());
+		int idx = 0;
 		for (const ParentSpriteToDraw *ps : *psd) {
-			float z_depth = ComputeWorldZDepth(ps->xmin, ps->xmax, ps->ymin, ps->ymax, ps->zmin, ps->zmax);
+			float z_depth = 0.499f - 0.498f * (static_cast<float>(idx) / std::max(sorted_count, 1));
 			float child_z = z_depth - 0.0001f;
 
 			if (ps->image != SPR_EMPTY_BOUNDING_BOX) {
@@ -1929,6 +1947,7 @@ static void ViewportDrawParentSprites(const ParentSpriteToSortVector *psd,
 				EmitGpuSpriteCommand(cs->image, cs->pal, cx, cy, child_z, dpi, vp, cs->sub);
 				child_z -= 0.00001f;
 			}
+			idx++;
 		}
 		return;
 	}
@@ -2028,6 +2047,9 @@ static void ViewportDrawStrings(ZoomLevel zoom, const StringSpriteToDrawVector *
 
 void ViewportDoDraw(const Viewport &vp, int left, int top, int right, int bottom)
 {
+#ifdef WITH_WGPU
+	if (_gpu_command_buffer != nullptr) _gpu_diag_viewport_draws++;
+#endif
 	_vd.dpi.zoom = vp.zoom;
 	int mask = ScaleByZoom(-1, vp.zoom);
 

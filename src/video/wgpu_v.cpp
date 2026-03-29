@@ -294,44 +294,34 @@ void VideoDriver_Wgpu::RenderFrame()
 	if (surface_texture.status != WGPUSurfaceGetCurrentTextureStatus_SuccessOptimal &&
 		surface_texture.status != WGPUSurfaceGetCurrentTextureStatus_SuccessSuboptimal) return;
 
-	WGPUTextureView view = wgpuTextureCreateView(surface_texture.texture, nullptr);
-	if (view == nullptr) {
-		wgpuTextureRelease(surface_texture.texture);
-		return;
-	}
+	/* Upload the CPU-rendered framebuffer directly to the surface texture.
+	 * The blitter has drawn the game world + UI into video_buffer (BGRA8).
+	 * We copy it to the surface texture and present. */
+	int w = this->gpu_device.GetWidth();
+	int h = this->gpu_device.GetHeight();
 
-	/* Build command encoder. */
-	WGPUCommandEncoderDescriptor enc_desc = {};
-	enc_desc.label = WGPUStringView{"wgpu_frame_encoder", 18};
-	WGPUCommandEncoder encoder = wgpuDeviceCreateCommandEncoder(this->gpu_device.GetDevice(), &enc_desc);
+	WGPUTexelCopyTextureInfo dst_info = {};
+	dst_info.texture = surface_texture.texture;
+	dst_info.mipLevel = 0;
+	dst_info.origin = {0, 0, 0};
 
-	/* Begin render pass with dark-blue clear colour. */
-	WGPURenderPassColorAttachment colour_attach = {};
-	colour_attach.view          = view;
-	colour_attach.loadOp        = WGPULoadOp_Clear;
-	colour_attach.storeOp       = WGPUStoreOp_Store;
-	colour_attach.clearValue    = { 0.05, 0.05, 0.15, 1.0 };
-	colour_attach.depthSlice    = WGPU_DEPTH_SLICE_UNDEFINED;
+	WGPUTexelCopyBufferLayout layout = {};
+	layout.offset = 0;
+	layout.bytesPerRow = static_cast<uint32_t>(w) * 4;
+	layout.rowsPerImage = static_cast<uint32_t>(h);
 
-	WGPURenderPassDescriptor pass_desc = {};
-	pass_desc.label                  = WGPUStringView{"wgpu_clear_pass", 15};
-	pass_desc.colorAttachmentCount   = 1;
-	pass_desc.colorAttachments       = &colour_attach;
+	WGPUExtent3D extent = {static_cast<uint32_t>(w), static_cast<uint32_t>(h), 1};
 
-	WGPURenderPassEncoder pass = wgpuCommandEncoderBeginRenderPass(encoder, &pass_desc);
-	wgpuRenderPassEncoderEnd(pass);
-	wgpuRenderPassEncoderRelease(pass);
+	wgpuQueueWriteTexture(
+		this->gpu_device.GetQueue(),
+		&dst_info,
+		this->video_buffer.data(),
+		static_cast<size_t>(w) * h * 4,
+		&layout,
+		&extent
+	);
 
-	/* Submit and present. */
-	WGPUCommandBufferDescriptor cmd_desc = {};
-	WGPUCommandBuffer cmd = wgpuCommandEncoderFinish(encoder, &cmd_desc);
-	wgpuQueueSubmit(this->gpu_device.GetQueue(), 1, &cmd);
-
-	wgpuCommandBufferRelease(cmd);
-	wgpuCommandEncoderRelease(encoder);
-	wgpuTextureViewRelease(view);
 	wgpuTextureRelease(surface_texture.texture);
-
 	wgpuSurfacePresent(surface);
 }
 

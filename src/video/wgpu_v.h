@@ -35,6 +35,9 @@ public:
 	std::string_view GetName() const override { return "wgpu"; }
 	std::string_view GetInfoString() const override { return this->driver_info; }
 
+	bool HasAnimBuffer() override { return true; }
+	uint8_t *GetAnimBuffer() override { return this->anim_buffer.data(); }
+
 protected:
 	void InputLoop() override;
 	bool PollEvent() override;
@@ -49,6 +52,7 @@ private:
 	WgpuDevice gpu_device;                    ///< Owned wgpu device/surface.
 
 	std::vector<uint32_t> video_buffer;       ///< CPU-side pixel buffer for blitter/UI.
+	std::vector<uint8_t> anim_buffer;         ///< Animation buffer for 32bpp-anim blitter.
 	std::string driver_info;                  ///< Human-readable driver info string.
 
 	bool edit_box_focused = false;            ///< Whether SDL text input mode is active.

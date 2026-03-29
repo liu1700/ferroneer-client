@@ -223,6 +223,7 @@ std::optional<std::string_view> VideoDriver_Wgpu::Start(const StringList &param)
 
 	/* Allocate CPU-side pixel buffer for the blitter / UI layer. */
 	this->video_buffer.assign(static_cast<size_t>(w) * h, 0);
+	this->anim_buffer.assign(static_cast<size_t>(w) * h, 0);
 	_screen.dst_ptr = this->video_buffer.data();
 	_screen.width   = static_cast<int>(w);
 	_screen.height  = static_cast<int>(h);
@@ -354,6 +355,7 @@ void VideoDriver_Wgpu::ResizeWindow(int w, int h)
 	this->gpu_device.Resize(w, h);
 
 	this->video_buffer.assign(static_cast<size_t>(w) * h, 0);
+	this->anim_buffer.assign(static_cast<size_t>(w) * h, 0);
 	_screen.dst_ptr = this->video_buffer.data();
 	_screen.width   = w;
 	_screen.height  = h;

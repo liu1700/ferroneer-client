@@ -565,8 +565,11 @@ static void *ReadSprite(const SpriteCache *sc, SpriteID id, SpriteType sprite_ty
 				m_data[i] = px.m;
 			}
 
-			_sprite_atlas->Upload(id, rgba.data(), m_data.data(),
+			AtlasEntry entry = _sprite_atlas->Upload(id, rgba.data(), m_data.data(),
 				src.width, src.height, src.x_offs, src.y_offs, zoom);
+			if (!entry.valid) {
+				Debug(sprite, 0, "atlas: failed to upload sprite {} zoom {}", id, to_underlying(zoom));
+			}
 		}
 	}
 #endif

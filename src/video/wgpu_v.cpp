@@ -560,14 +560,23 @@ void VideoDriver_Wgpu::RenderFrame()
 {
 	if (!this->gpu_device.IsReady()) return;
 
+	/* Always reset command buffer at frame start to prevent stale command accumulation
+	 * from a previous failed frame polluting the next frame's sprite submission. */
+	this->command_buffer.Reset();
+
 	/* Use the GpuRenderer for the full frame if it's ready. */
 	if (this->renderer.BeginFrame()) {
 		this->renderer.SubmitSprites(this->command_buffer);
 		this->renderer.CompositeUI(this->video_buffer.data(), _screen.width, _screen.height);
 		this->renderer.Present();
-		this->command_buffer.Reset();
 		return;
 	}
+
+	/* BeginFrame failed (lost surface, timeout, etc.).  The viewport skipped CPU
+	 * blitter drawing this frame because _gpu_command_buffer was non-null, so
+	 * video_buffer contains no sprites.  Don't blit it — just bail out and let
+	 * the next frame start clean. */
+	return;
 
 	/* Fallback: old blit-only path (surface not ready or renderer not initialised). */
 	if (this->blit_pipeline == nullptr) return;

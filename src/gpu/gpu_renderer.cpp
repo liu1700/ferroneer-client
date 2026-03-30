@@ -574,23 +574,33 @@ void GpuRenderer::SubmitSprites(const SpriteCommandBuffer &commands)
 	wgpuRenderPassEncoderSetPipeline(pass, this->sprite_pipeline);
 	wgpuRenderPassEncoderSetBindGroup(pass, 0, this->viewport_bind_group, 0, nullptr);
 
-	/* Iterate per-page batches and draw instanced. */
+	/* Upload all page batches into stable, non-overlapping ranges of the
+	 * instance buffer before drawing. Reusing offset 0 for every page lets later
+	 * uploads overwrite the data earlier draws still reference. */
+	this->EnsureInstanceBuffer(commands.TotalCount());
+
+	std::array<size_t, SpriteCommandBuffer::MAX_ATLAS_PAGES> page_offsets{};
+	size_t instance_base = 0;
 	for (uint16_t page = 0; page <= max_page && page < SpriteCommandBuffer::MAX_ATLAS_PAGES; ++page) {
 		size_t count = commands.PageCount(page);
 		if (count == 0) continue;
 
-		/* Ensure instance buffer is large enough. */
-		this->EnsureInstanceBuffer(count);
-
-		/* Upload instance data to GPU. */
+		page_offsets[page] = instance_base;
 		const GpuSpriteInstance *data = commands.PageData(page);
 		wgpuQueueWriteBuffer(
 			this->dev->GetQueue(),
 			this->instance_buffer,
-			0,
+			instance_base * sizeof(GpuSpriteInstance),
 			data,
 			count * sizeof(GpuSpriteInstance)
 		);
+		instance_base += count;
+	}
+
+	/* Iterate per-page batches and draw instanced. */
+	for (uint16_t page = 0; page <= max_page && page < SpriteCommandBuffer::MAX_ATLAS_PAGES; ++page) {
+		size_t count = commands.PageCount(page);
+		if (count == 0) continue;
 
 		/* Bind atlas textures for this page. */
 		if (page < this->atlas_bind_groups.size() && this->atlas_bind_groups[page] != nullptr) {
@@ -600,7 +610,8 @@ void GpuRenderer::SubmitSprites(const SpriteCommandBuffer &commands)
 		}
 
 		/* Set instance buffer and draw. */
-		wgpuRenderPassEncoderSetVertexBuffer(pass, 0, this->instance_buffer, 0, count * sizeof(GpuSpriteInstance));
+		const uint64_t offset = page_offsets[page] * sizeof(GpuSpriteInstance);
+		wgpuRenderPassEncoderSetVertexBuffer(pass, 0, this->instance_buffer, offset, count * sizeof(GpuSpriteInstance));
 		wgpuRenderPassEncoderDraw(pass, 4, static_cast<uint32_t>(count), 0, 0);
 	}
 

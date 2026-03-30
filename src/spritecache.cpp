@@ -537,16 +537,17 @@ static void *ReadSprite(const SpriteCache *sc, SpriteID id, SpriteType sprite_ty
 	}
 
 #ifdef WITH_WGPU
-	/* Upload decoded sprite data to the GPU atlas before the blitter encodes it. */
+	/* Upload the final root sprite once to the GPU atlas. CPU blitters draw every
+	 * zoom level by scaling this stable root representation, so mirroring that
+	 * behaviour avoids per-zoom metadata mismatches in the atlas. */
 	if (_sprite_atlas != nullptr && sprite_type == SpriteType::Normal) {
-		for (ZoomLevel zoom : sprite_avail) {
-			const SpriteLoader::Sprite &src = sprite[zoom];
-			if (src.width == 0 || src.height == 0 || src.data == nullptr) continue;
-
+		const SpriteLoader::Sprite &src = sprite.Root();
+		if (src.width != 0 && src.height != 0 && src.data != nullptr) {
 			uint32_t pixel_count = static_cast<uint32_t>(src.width) * src.height;
 			std::vector<uint8_t> rgba(pixel_count * 4);
 			std::vector<uint8_t> m_data(pixel_count);
 			bool has_rgb = src.colours.Test(SpriteComponent::RGB);
+			bool has_alpha = src.colours.Test(SpriteComponent::Alpha);
 
 			for (uint32_t i = 0; i < pixel_count; i++) {
 				const SpriteLoader::CommonPixel &px = src.data[i];
@@ -561,14 +562,21 @@ static void *ReadSprite(const SpriteCache *sc, SpriteID id, SpriteType sprite_ty
 					rgba[i * 4 + 1] = c.g;
 					rgba[i * 4 + 2] = c.b;
 				}
-				rgba[i * 4 + 3] = px.a;
+
+				/* Palette-only sprites use palette index 0 as transparent and any
+				 * non-zero index as opaque. Preserve explicit alpha when present,
+				 * but reconstruct opacity from the palette index for plain 8bpp
+				 * sprites so atlas upload matches the CPU/OpenGL sprite semantics. */
+				uint8_t alpha = px.a;
+				if (!has_rgb && !has_alpha) alpha = (px.m == 0) ? 0 : 255;
+				rgba[i * 4 + 3] = alpha;
 				m_data[i] = px.m;
 			}
 
 			AtlasEntry entry = _sprite_atlas->Upload(id, rgba.data(), m_data.data(),
-				src.width, src.height, src.x_offs, src.y_offs, zoom);
+				src.width, src.height, src.x_offs, src.y_offs, ZoomLevel::Min);
 			if (!entry.valid) {
-				Debug(sprite, 0, "atlas: failed to upload sprite {} zoom {}", id, to_underlying(zoom));
+				Debug(sprite, 0, "atlas: failed to upload sprite {}", id);
 			}
 		}
 	}

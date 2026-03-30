@@ -1150,21 +1150,22 @@ draw_inner:
 		if (_thd.drawstyle & HT_RECT) {
 			/* Draw road stop building preview: dark silhouette for building shape,
 			 * then prominent green/red selection border for valid/invalid feedback. */
-			if (!_thd.make_square_red) {
+			{
 				RoadStopPreviewInfo preview = GetRoadStopPlacementPreview();
 				if (preview.active) {
 					StationType st = preview.is_bus ? StationType::Bus : StationType::Truck;
 					const DrawTileSprites *t = GetStationTileLayout(st, preview.orientation);
 
-					/* Draw building sequence sprites as dark silhouettes at correct positions.
+					/* Draw building sequence sprites as tinted silhouettes at correct positions.
+					 * Green = valid placement, Red = invalid placement.
 					 * Skip ground sprite — the selection border provides ground-level feedback. */
+					PaletteID preview_pal = _thd.make_square_red ? PALETTE_TO_STRUCT_RED : PALETTE_TO_STRUCT_BLUE;
 					for (const DrawTileSeqStruct &dtss : t->GetSequence()) {
 						SpriteID image = dtss.image.sprite;
 						if (GB(image, 0, SPRITE_WIDTH) == 0) continue;
 
 						SpriteID timg = image;
 						SetBit(timg, PALETTE_MODIFIER_TRANSPARENT);
-						PaletteID preview_pal = _thd.make_square_red ? PALETTE_TO_STRUCT_RED : PALETTE_TO_STRUCT_BLUE;
 						AddTileSpriteToDraw(timg, preview_pal,
 							ti->x + dtss.origin.x, ti->y + dtss.origin.y, ti->z + dtss.origin.z);
 					}
@@ -1635,7 +1636,6 @@ static void EmitGpuSpriteCommand(SpriteID image, PaletteID pal,
 	if (_gpu_suppress_sprite_emit) return;
 
 	SpriteID sprite_id = image & SPRITE_MASK;
-
 	ZoomLevel zoom = dpi->zoom;
 
 	AtlasEntry entry = _sprite_atlas->Get(sprite_id, ZoomLevel::Min);
@@ -1719,14 +1719,14 @@ static void EmitGpuSpriteCommand(SpriteID image, PaletteID pal,
 
 	/* Check for building preview / selection struct palettes FIRST.
 	 * These take priority over transparent mode to avoid double-darkening. */
-	PaletteID pal_stripped = pal & ~(PALETTE_MODIFIER_TRANSPARENT | PALETTE_MODIFIER_COLOUR);
+	PaletteID pal_stripped = pal & ~((1U << PALETTE_MODIFIER_TRANSPARENT) | (1U << PALETTE_MODIFIER_COLOUR));
 	if (pal_stripped == PALETTE_SEL_TILE_RED || pal_stripped == PALETTE_TO_STRUCT_RED) {
-		tint_r = 1.0f; tint_g = 0.4f; tint_b = 0.4f;
-		alpha = 160;
+		tint_r = 1.0f; tint_g = 0.15f; tint_b = 0.15f;
+		alpha = 210;
 	} else if (pal_stripped == PALETTE_SEL_TILE_BLUE || pal_stripped == PALETTE_TO_STRUCT_BLUE
 	        || pal_stripped == PALETTE_TO_STRUCT_GREEN) {
-		tint_r = 0.4f; tint_g = 1.0f; tint_b = 0.4f;
-		alpha = 160;
+		tint_r = 0.15f; tint_g = 1.0f; tint_b = 0.15f;
+		alpha = 210;
 	} else if (HasBit(image, PALETTE_MODIFIER_TRANSPARENT) || HasBit(pal, PALETTE_MODIFIER_TRANSPARENT)) {
 		mode = GPU_SPRITE_TRANSPARENT;
 	} else if (HasBit(pal, PALETTE_MODIFIER_COLOUR)) {

@@ -20,8 +20,12 @@
 #include "../fileio_func.h"
 #include "../framerate_type.h"
 #include "../window_func.h"
+#include "../viewport_func.h"
+#include "../window_gui.h"
 #include "wgpu_v.h"
 #include "../gpu/sprite_atlas.h"
+#include "../spritecache.h"
+#include "../gpu/sprite_command.h"
 #include <SDL.h>
 #ifdef __APPLE__
 #	include <SDL_metal.h>
@@ -492,17 +496,9 @@ std::optional<std::string_view> VideoDriver_Wgpu::Start(const StringList &param)
 	_sprite_atlas = &atlas_instance;
 	_sprite_atlas->Reset();
 
-	/* Temporary atlas smoke-test: upload a 64×64 red square. */
-	{
-		std::vector<uint8_t> test_rgba(64 * 64 * 4, 0);
-		for (size_t i = 0; i < test_rgba.size(); i += 4) {
-			test_rgba[i]     = 255; /* R */
-			test_rgba[i + 3] = 255; /* A */
-		}
-		AtlasEntry e = _sprite_atlas->Upload(0, test_rgba.data(), nullptr, 64, 64, 0, 0, ZoomLevel::Normal);
-		Debug(driver, 0, "atlas test: page={} uv=({:.5f},{:.5f})..({:.5f},{:.5f}) valid={}",
-			e.page, e.u0, e.v0, e.u1, e.v1, e.valid ? 1 : 0);
-	}
+	/* Sprites decoded before the atlas existed have no atlas entries.
+	 * The sprite cache is cleared on the first Paint() call (after all
+	 * subsystems are initialized) to force re-decode with atlas upload. */
 
 	/* Allocate CPU-side pixel buffer for the blitter / UI layer. */
 	this->video_buffer.assign(static_cast<size_t>(w) * h, 0);
@@ -724,10 +720,54 @@ void VideoDriver_Wgpu::RenderFrame()
 void VideoDriver_Wgpu::Paint()
 {
 	PerformanceMeasurer framerate(PFE_VIDEO);
+
 	this->command_buffer.Reset();
 	std::fill(this->video_buffer.begin(), this->video_buffer.end(), 0);
+
+#ifdef WITH_WGPU
+	/* On first frame, flush sprites cached before the atlas existed so they
+	 * get re-decoded (triggering atlas upload) on next access. */
+	static bool sprite_cache_cleared = false;
+	if (!sprite_cache_cleared && _sprite_atlas != nullptr) {
+		GfxClearSpriteCache();
+		sprite_cache_cleared = true;
+	}
+
+	/* Phase 1 — GPU sprites: draw each viewport in a single pass so every
+	 * sprite is collected once, sorted once, and emitted once with a
+	 * globally consistent z_depth.  This eliminates per-dirty-block
+	 * duplicate emissions that caused z_depth chaos. */
+	if (_gpu_command_buffer != nullptr) {
+		/* ViewportDoDraw reads _cur_dpi for pitch and dst_ptr.
+		 * Outside DrawDirtyBlocks it may be stale, so point it at _screen. */
+		_cur_dpi = &_screen;
+		for (const Window *w : Window::Iterate()) {
+			if (w->viewport == nullptr) continue;
+			const Viewport &vp = *w->viewport;
+			ViewportDoDraw(vp,
+				vp.virtual_left,
+				vp.virtual_top,
+				vp.virtual_left + vp.virtual_width,
+				vp.virtual_top + vp.virtual_height);
+		}
+	}
+
+	/* Phase 2 — CPU UI: suppress GPU sprite emission so DrawDirtyBlocks
+	 * only produces CPU-rendered content (signs, text, overlays, UI).
+	 * ViewportDrawTileSprites/ViewportDrawParentSprites still take the
+	 * GPU branch (checking _gpu_command_buffer != nullptr) and return
+	 * early, so viewport content is NOT drawn to the CPU buffer — the
+	 * GPU handles it from Phase 1. */
+	_gpu_suppress_sprite_emit = true;
+#endif
+
 	MarkWholeScreenDirty();
 	DrawDirtyBlocks();
+
+#ifdef WITH_WGPU
+	_gpu_suppress_sprite_emit = false;
+#endif
+
 	this->RenderFrame();
 }
 

@@ -55,7 +55,7 @@ inline uint32_t PackModeRemap(uint8_t mode, uint8_t remap_index, uint8_t alpha)
  */
 class SpriteCommandBuffer {
 public:
-	static constexpr size_t MAX_ATLAS_PAGES = 32;
+	static constexpr size_t MAX_ATLAS_PAGES = 128;
 
 	/** Clear all batches for a new frame. */
 	void Reset();
@@ -85,6 +85,9 @@ private:
 
 /** Global command buffer. Non-null when GPU rendering is active. */
 extern SpriteCommandBuffer *_gpu_command_buffer;
+
+/** When true, EmitGpuSpriteCommand skips emission (used during DrawDirtyBlocks phase). */
+extern bool _gpu_suppress_sprite_emit;
 
 #endif /* WITH_WGPU */
 

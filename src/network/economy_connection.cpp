@@ -16,6 +16,8 @@
 #include "../console_func.h"
 #include "../core/string_consumer.hpp"
 #include "../ferroneer_welcome_gui.h"
+#include "../company_base.h"
+#include "../company_func.h"
 
 #include "../safeguards.h"
 
@@ -175,6 +177,16 @@ void EconomyConnection::ProcessMessage(const nlohmann::json &msg)
 
 			Debug(net, 3, "[economy] CommandResult: request_id={}, accepted={}, reason={}", request_id, accepted, reason);
 
+			/* Apply new_cash if present (real-time balance sync on commands). */
+			if (msg.contains("new_cash")) {
+				double cash = msg["new_cash"].get<double>();
+				_economy_data.player_cash = cash;
+				_economy_data.player_cash_valid = true;
+				Company *c = Company::GetIfValid(_local_company);
+				if (c != nullptr) c->money = (Money)std::llround(cash);
+				Debug(net, 3, "[economy] Cash updated via CommandResult: ${:.2f}", cash);
+			}
+
 			CommandCallback cb;
 			{
 				std::lock_guard<std::mutex> lock(this->mutex);
@@ -255,6 +267,25 @@ void EconomyConnection::ProcessMessage(const nlohmann::json &msg)
 			for (auto &[k, v] : _economy_data.prices) {
 				Debug(net, 4, "[economy]   {} = ${:.2f}", k, v);
 			}
+			break;
+		}
+
+		case EconomyProtocol::ServerMsgType::PlayerCashSync: {
+			double cash = msg.value("cash", 0.0);
+			double total_earned = msg.value("total_earned", 0.0);
+			double total_spent = msg.value("total_spent", 0.0);
+
+			_economy_data.player_cash = cash;
+			_economy_data.player_total_earned = total_earned;
+			_economy_data.player_total_spent = total_spent;
+			_economy_data.player_cash_valid = true;
+
+			/* Override Company::money with authoritative server value (Approach A). */
+			Company *c = Company::GetIfValid(_local_company);
+			if (c != nullptr) c->money = (Money)std::llround(cash);
+
+			Debug(net, 3, "[economy] PlayerCashSync: cash=${:.2f} earned=${:.2f} spent=${:.2f}",
+				cash, total_earned, total_spent);
 			break;
 		}
 

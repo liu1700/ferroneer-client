@@ -1186,25 +1186,25 @@ draw_inner:
 							ti->x + dtss.origin.x, ti->y + dtss.origin.y, ti->z + dtss.origin.z);
 					}
 
-					/* Draw entrance direction arrow(s) on the station tile.
-					 * Uses existing SPR_ARROW_* UI sprites as directional indicators.
-					 * Bay stops: 1 arrow (entrance direction).
-					 * Drive-through stops: 2 arrows (both directions). */
-					static const SpriteID arrow_for_diagdir[] = {
-						SPR_ARROW_RIGHT, /* DIAGDIR_NE → upper-right on screen */
-						SPR_ARROW_DOWN,  /* DIAGDIR_SE → lower-right on screen */
-						SPR_ARROW_LEFT,  /* DIAGDIR_SW → lower-left on screen */
-						SPR_ARROW_UP,    /* DIAGDIR_NW → upper-left on screen */
+					/* Draw entrance direction arrow(s) using one-way road sprites.
+					 * These are isometric ground overlays designed for the map view.
+					 * Sprite layout: SPR_ONEWAY_BASE + (drd-1) + (road_axis == Y ? 3 : 0)
+					 *   DRD_NORTHBOUND(1)-1=0: arrow pointing NE (X-axis) or NW (Y-axis)
+					 *   DRD_SOUTHBOUND(2)-1=1: arrow pointing SW (X-axis) or SE (Y-axis) */
+					static const uint8_t oneway_offset_for_diagdir[] = {
+						0, /* DIAGDIR_NE → X-axis, northbound */
+						4, /* DIAGDIR_SE → Y-axis, southbound */
+						1, /* DIAGDIR_SW → X-axis, southbound */
+						3, /* DIAGDIR_NW → Y-axis, northbound */
 					};
 
-					SpriteID arrow = arrow_for_diagdir[preview.ddir];
-					AddTileSpriteToDraw(arrow, preview_pal, ti->x, ti->y, ti->z);
+					SpriteID arrow = SPR_ONEWAY_BASE + oneway_offset_for_diagdir[preview.ddir];
+					DrawGroundSpriteAt(arrow, preview_pal, 8, 8, GetPartialPixelZ(8, 8, ti->tileh));
 
 					if (preview.is_drive_through) {
-						/* Opposite direction arrow for the other end. */
 						DiagDirection opposite = ReverseDiagDir(preview.ddir);
-						SpriteID arrow_opp = arrow_for_diagdir[opposite];
-						AddTileSpriteToDraw(arrow_opp, preview_pal, ti->x, ti->y, ti->z);
+						SpriteID arrow_opp = SPR_ONEWAY_BASE + oneway_offset_for_diagdir[opposite];
+						DrawGroundSpriteAt(arrow_opp, preview_pal, 8, 8, GetPartialPixelZ(8, 8, ti->tileh));
 					}
 				}
 			}
@@ -1754,19 +1754,22 @@ static void EmitGpuSpriteCommand(SpriteID image, PaletteID pal,
 	float tint_r = 1.0f, tint_g = 1.0f, tint_b = 1.0f;
 	uint8_t alpha = 255;
 
-	/* Check for building preview / selection struct palettes FIRST.
-	 * These take priority over transparent mode to avoid double-darkening. */
+	/* Preview sprites combine transparent draw mode with struct recolour palettes.
+	 * Only treat struct palettes as explicit green/red preview tint in that case.
+	 * Outside preview rendering, these palettes are normal recolour remaps used by
+	 * regular game sprites (for example some town buildings). */
 	PaletteID pal_stripped = pal & ~((1U << PALETTE_MODIFIER_TRANSPARENT) | (1U << PALETTE_MODIFIER_COLOUR));
-	if (pal_stripped == PALETTE_SEL_TILE_RED || pal_stripped == PALETTE_TO_STRUCT_RED) {
+	bool is_transparent_preview = HasBit(image, PALETTE_MODIFIER_TRANSPARENT) || HasBit(pal, PALETTE_MODIFIER_TRANSPARENT);
+	if (pal_stripped == PALETTE_SEL_TILE_RED || (is_transparent_preview && pal_stripped == PALETTE_TO_STRUCT_RED)) {
 		tint_r = 1.0f; tint_g = 0.15f; tint_b = 0.15f;
 		alpha = 210;
-	} else if (pal_stripped == PALETTE_SEL_TILE_BLUE || pal_stripped == PALETTE_TO_STRUCT_BLUE
-	        || pal_stripped == PALETTE_TO_STRUCT_GREEN) {
+	} else if (pal_stripped == PALETTE_SEL_TILE_BLUE ||
+			(is_transparent_preview && (pal_stripped == PALETTE_TO_STRUCT_BLUE || pal_stripped == PALETTE_TO_STRUCT_GREEN))) {
 		tint_r = 0.15f; tint_g = 1.0f; tint_b = 0.15f;
 		alpha = 210;
 	} else if (HasBit(image, PALETTE_MODIFIER_TRANSPARENT) || HasBit(pal, PALETTE_MODIFIER_TRANSPARENT)) {
 		mode = GPU_SPRITE_TRANSPARENT;
-	} else if (HasBit(pal, PALETTE_MODIFIER_COLOUR)) {
+	} else if (pal != PAL_NONE) {
 		mode = GPU_SPRITE_REMAP;
 		SpriteID recolour_id = pal & SPRITE_MASK;
 		remap_idx = (_remap_table != nullptr) ? _remap_table->GetRowIndex(recolour_id) : 0;

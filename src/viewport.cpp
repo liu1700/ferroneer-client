@@ -90,6 +90,7 @@
 #include "network/network_func.h"
 #include "framerate_type.h"
 #include "viewport_cmd.h"
+#include "direction_func.h"
 
 #include <forward_list>
 #include <stack>
@@ -1183,6 +1184,27 @@ draw_inner:
 						SetBit(timg, PALETTE_MODIFIER_TRANSPARENT);
 						AddTileSpriteToDraw(timg, preview_pal,
 							ti->x + dtss.origin.x, ti->y + dtss.origin.y, ti->z + dtss.origin.z);
+					}
+
+					/* Draw entrance direction arrow(s) on the station tile.
+					 * Uses existing SPR_ARROW_* UI sprites as directional indicators.
+					 * Bay stops: 1 arrow (entrance direction).
+					 * Drive-through stops: 2 arrows (both directions). */
+					static const SpriteID arrow_for_diagdir[] = {
+						SPR_ARROW_RIGHT, /* DIAGDIR_NE → upper-right on screen */
+						SPR_ARROW_DOWN,  /* DIAGDIR_SE → lower-right on screen */
+						SPR_ARROW_LEFT,  /* DIAGDIR_SW → lower-left on screen */
+						SPR_ARROW_UP,    /* DIAGDIR_NW → upper-left on screen */
+					};
+
+					SpriteID arrow = arrow_for_diagdir[preview.ddir];
+					AddTileSpriteToDraw(arrow, preview_pal, ti->x, ti->y, ti->z);
+
+					if (preview.is_drive_through) {
+						/* Opposite direction arrow for the other end. */
+						DiagDirection opposite = ReverseDiagDir(preview.ddir);
+						SpriteID arrow_opp = arrow_for_diagdir[opposite];
+						AddTileSpriteToDraw(arrow_opp, preview_pal, ti->x, ti->y, ti->z);
 					}
 				}
 			}

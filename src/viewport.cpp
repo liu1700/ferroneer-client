@@ -97,6 +97,7 @@
 #include "widgets/vehicle_widget.h"
 
 #include "road_gui.h"
+#include "station_cmd.h"
 #include "station_func.h"
 
 #include "table/strings.h"
@@ -1153,13 +1154,27 @@ draw_inner:
 			{
 				RoadStopPreviewInfo preview = GetRoadStopPlacementPreview();
 				if (preview.active) {
+					/* Dry-run the build command to check if this tile is buildable. */
+					RoadStopType stop_type = preview.is_bus ? RoadStopType::Bus : RoadStopType::Truck;
+					CommandCost cost = Command<Commands::BuildRoadStop>::Do(
+						CommandFlagsToDCFlags(GetCommandFlags<Commands::BuildRoadStop>()),
+						ti->tile,
+						1, 1,  /* width, length — single tile */
+						stop_type,
+						preview.is_drive_through,
+						preview.ddir,
+						preview.road_type,
+						preview.spec_class,
+						preview.spec_index,
+						StationID::Invalid(),
+						true   /* adjacent */
+					);
+					bool can_build = cost.Succeeded();
+
 					StationType st = preview.is_bus ? StationType::Bus : StationType::Truck;
 					const DrawTileSprites *t = GetStationTileLayout(st, preview.orientation);
 
-					/* Draw building sequence sprites as tinted silhouettes at correct positions.
-					 * Green = valid placement, Red = invalid placement.
-					 * Skip ground sprite — the selection border provides ground-level feedback. */
-					PaletteID preview_pal = _thd.make_square_red ? PALETTE_TO_STRUCT_RED : PALETTE_TO_STRUCT_BLUE;
+					PaletteID preview_pal = can_build ? PALETTE_TO_STRUCT_BLUE : PALETTE_TO_STRUCT_RED;
 					for (const DrawTileSeqStruct &dtss : t->GetSequence()) {
 						SpriteID image = dtss.image.sprite;
 						if (GB(image, 0, SPRITE_WIDTH) == 0) continue;

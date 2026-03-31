@@ -126,7 +126,7 @@ RoadDepotPreviewInfo GetRoadDepotPlacementPreview()
 	RoadDepotPreviewInfo info{};
 	info.active = false;
 
-	if (FindWindowByClass(WC_BUILD_DEPOT) == nullptr) return info;
+	if (FindWindowById(WC_BUILD_DEPOT, TRANSPORT_ROAD) == nullptr) return info;
 
 	info.active = true;
 	info.ddir = _road_depot_orientation;

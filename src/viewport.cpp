@@ -1152,17 +1152,25 @@ static void DrawTileSelection(const TileInfo *ti)
 			IsInsideBS(ti->y, _thd.pos.y, _thd.size.y)) {
 draw_inner:
 		if (_thd.drawstyle & HT_RECT) {
+			/* Map DiagDirection to one-way road arrow sprite offset.
+			 * SPR_ONEWAY_BASE + offset gives the correct isometric arrow. */
+			static const uint8_t oneway_offset_for_diagdir[] = {
+				0, /* DIAGDIR_NE */
+				4, /* DIAGDIR_SE */
+				1, /* DIAGDIR_SW */
+				3, /* DIAGDIR_NW */
+			};
+
 			/* Draw road stop building preview: dark silhouette for building shape,
 			 * then prominent green/red selection border for valid/invalid feedback. */
 			{
 				RoadStopPreviewInfo preview = GetRoadStopPlacementPreview();
 				if (preview.active) {
-					/* Dry-run the build command to check if this tile is buildable. */
 					RoadStopType stop_type = preview.is_bus ? RoadStopType::Bus : RoadStopType::Truck;
 					CommandCost cost = Command<Commands::BuildRoadStop>::Do(
 						CommandFlagsToDCFlags(GetCommandFlags<Commands::BuildRoadStop>()),
 						ti->tile,
-						1, 1,  /* width, length — single tile */
+						1, 1,
 						stop_type,
 						preview.is_drive_through,
 						preview.ddir,
@@ -1170,35 +1178,20 @@ draw_inner:
 						preview.spec_class,
 						preview.spec_index,
 						StationID::Invalid(),
-						true   /* adjacent */
+						true
 					);
-					bool can_build = cost.Succeeded();
+					PaletteID preview_pal = cost.Succeeded() ? PALETTE_TO_STRUCT_BLUE : PALETTE_TO_STRUCT_RED;
 
 					StationType st = preview.is_bus ? StationType::Bus : StationType::Truck;
 					const DrawTileSprites *t = GetStationTileLayout(st, preview.orientation);
-
-					PaletteID preview_pal = can_build ? PALETTE_TO_STRUCT_BLUE : PALETTE_TO_STRUCT_RED;
 					for (const DrawTileSeqStruct &dtss : t->GetSequence()) {
 						SpriteID image = dtss.image.sprite;
 						if (GB(image, 0, SPRITE_WIDTH) == 0) continue;
-
 						SpriteID timg = image;
 						SetBit(timg, PALETTE_MODIFIER_TRANSPARENT);
 						AddTileSpriteToDraw(timg, preview_pal,
 							ti->x + dtss.origin.x, ti->y + dtss.origin.y, ti->z + dtss.origin.z);
 					}
-
-					/* Draw entrance direction arrow(s) using one-way road sprites.
-					 * These are isometric ground overlays designed for the map view.
-					 * Sprite layout: SPR_ONEWAY_BASE + (drd-1) + (road_axis == Y ? 3 : 0)
-					 *   DRD_NORTHBOUND(1)-1=0: arrow pointing NE (X-axis) or NW (Y-axis)
-					 *   DRD_SOUTHBOUND(2)-1=1: arrow pointing SW (X-axis) or SE (Y-axis) */
-					static const uint8_t oneway_offset_for_diagdir[] = {
-						0, /* DIAGDIR_NE → X-axis, northbound */
-						4, /* DIAGDIR_SE → Y-axis, southbound */
-						1, /* DIAGDIR_SW → X-axis, southbound */
-						3, /* DIAGDIR_NW → Y-axis, northbound */
-					};
 
 					SpriteID arrow = SPR_ONEWAY_BASE + oneway_offset_for_diagdir[preview.ddir];
 					DrawGroundSpriteAt(arrow, preview_pal, 8, 8, GetPartialPixelZ(8, 8, ti->tileh));
@@ -1221,27 +1214,25 @@ draw_inner:
 						depot_preview.road_type,
 						depot_preview.ddir
 					);
-					bool can_build = cost.Succeeded();
-					PaletteID preview_pal = can_build ? PALETTE_TO_STRUCT_BLUE : PALETTE_TO_STRUCT_RED;
+					PaletteID preview_pal = cost.Succeeded() ? PALETTE_TO_STRUCT_BLUE : PALETTE_TO_STRUCT_RED;
+					DrawGroundSpriteAt(SPR_FLAT_GRASS_TILE, preview_pal, 0, 0, GetPartialPixelZ(8, 8, ti->tileh));
 
-					/* Direction arrow for depot entrance. */
-					static const uint8_t oneway_offset_for_diagdir[] = {
-						0, /* DIAGDIR_NE */
-						4, /* DIAGDIR_SE */
-						1, /* DIAGDIR_SW */
-						3, /* DIAGDIR_NW */
-					};
 					SpriteID arrow = SPR_ONEWAY_BASE + oneway_offset_for_diagdir[depot_preview.ddir];
 					DrawGroundSpriteAt(arrow, preview_pal, 8, 8, GetPartialPixelZ(8, 8, ti->tileh));
 				}
 			}
 
-			/* Draw rail station building preview: tint all tiles in the footprint. */
+			/* Draw rail station building preview: tint all tiles in the footprint.
+			 * Cache the dry-run result to avoid O(N^2) — the result is the same for all tiles. */
 			{
-				TileIndex origin = TileVirtXY(_thd.pos.x, _thd.pos.y);
-				RailStationPreviewInfo stn_preview = GetRailStationPlacementPreview(origin);
-				if (stn_preview.active) {
-					PaletteID preview_pal = stn_preview.can_build ? PALETTE_TO_STRUCT_BLUE : PALETTE_TO_STRUCT_RED;
+				static Point cached_pos = {-1, -1};
+				static RailStationPreviewInfo cached_stn = {};
+				if (cached_pos.x != _thd.pos.x || cached_pos.y != _thd.pos.y) {
+					cached_pos = {_thd.pos.x, _thd.pos.y};
+					cached_stn = GetRailStationPlacementPreview(TileVirtXY(_thd.pos.x, _thd.pos.y));
+				}
+				if (cached_stn.active) {
+					PaletteID preview_pal = cached_stn.can_build ? PALETTE_TO_STRUCT_BLUE : PALETTE_TO_STRUCT_RED;
 					DrawGroundSpriteAt(SPR_FLAT_GRASS_TILE, preview_pal, 0, 0, GetPartialPixelZ(8, 8, ti->tileh));
 				}
 			}

@@ -111,6 +111,7 @@ RailStationPreviewInfo GetRailStationPlacementPreview(TileIndex tile_org)
 	info.can_build = cost.Succeeded();
 	return info;
 }
+
 static void ShowBuildTrainDepotPicker(Window *parent);
 static void ShowBuildWaypointPicker(Window *parent);
 static Window *ShowStationBuilder(Window *parent);

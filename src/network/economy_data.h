@@ -33,6 +33,12 @@ struct EconomyData {
 	uint32_t phase_expansion = 0;
 
 	bool valid = false;  ///< true once the first snapshot has been received
+
+	/* Per-player cash sync from the economy server. */
+	double player_cash = 0.0;          ///< authoritative cash balance
+	double player_total_earned = 0.0;  ///< lifetime earnings
+	double player_total_spent = 0.0;   ///< lifetime spending
+	bool player_cash_valid = false;    ///< true once first cash sync received
 };
 
 extern EconomyData _economy_data;

@@ -134,6 +134,10 @@ bool DoZoomInOutWindow(ZoomStateChange how, Window *w)
 		w->viewport->virtual_top = w->viewport->scrollpos_y;
 	}
 
+	/* Zoom changes the mapping between screen pixels and world coordinates.
+	 * Force a full redraw so no stale dirty-block coverage remains. */
+	if (how != ZOOM_NONE) MarkWholeScreenDirty();
+
 	/* Update the windows that have zoom-buttons to perhaps disable their buttons */
 	w->InvalidateData();
 	return true;

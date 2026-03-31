@@ -15,6 +15,7 @@
 #include "tile_type.h"
 #include "direction_type.h"
 #include "dropdown_type.h"
+#include "newgrf_roadstop.h"
 
 struct Window *ShowBuildRoadToolbar(RoadType roadtype);
 struct Window *ShowBuildRoadScenToolbar(RoadType roadtype);
@@ -25,9 +26,14 @@ void InitializeRoadGUI();
 
 /** Info needed to draw a road stop placement preview. */
 struct RoadStopPreviewInfo {
-	bool active;         ///< Whether a road stop picker is currently open.
-	uint8_t orientation; ///< Station gfx index (0-3 bay, 4-5 drive-through).
-	bool is_bus;         ///< True for bus stop, false for truck stop.
+	bool active;             ///< Whether a road stop picker is currently open.
+	bool is_bus;             ///< True for bus stop, false for truck stop.
+	uint8_t orientation;     ///< Station gfx index (0-3 bay, 4-5 drive-through).
+	DiagDirection ddir;      ///< Entrance direction (adjusted for bay vs drive-through).
+	bool is_drive_through;   ///< True if drive-through orientation selected.
+	RoadType road_type;      ///< Current road type being built.
+	RoadStopClassID spec_class; ///< Station spec class (default or NewGRF).
+	uint16_t spec_index;     ///< Station spec index within class.
 };
 RoadStopPreviewInfo GetRoadStopPlacementPreview();
 

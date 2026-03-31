@@ -106,6 +106,14 @@ RoadStopPreviewInfo GetRoadStopPlacementPreview()
 	info.active = true;
 	info.is_bus = is_bus;
 	info.orientation = static_cast<uint8_t>(_roadstop_gui.orientation);
+
+	/* Parameters needed for CMD_BUILD_ROAD_STOP dry-run validation. */
+	DiagDirection ddir = _roadstop_gui.orientation;
+	info.is_drive_through = (ddir >= DIAGDIR_END);
+	info.ddir = info.is_drive_through ? static_cast<DiagDirection>(ddir - DIAGDIR_END) : ddir;
+	info.road_type = _cur_roadtype;
+	info.spec_class = _roadstop_gui.sel_class;
+	info.spec_index = _roadstop_gui.sel_type;
 	return info;
 }
 

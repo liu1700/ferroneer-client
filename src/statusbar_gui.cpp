@@ -28,6 +28,7 @@
 #include "timer/timer.h"
 #include "timer/timer_game_calendar.h"
 #include "timer/timer_window.h"
+#include "network/economy_connection.h"
 
 #include "widgets/statusbar_widget.h"
 
@@ -119,10 +120,12 @@ struct StatusBarWindow : Window {
 				} else if (_settings_game.difficulty.infinite_money) {
 					DrawString(tr, STR_STATUSBAR_INFINITE_MONEY, TC_FROMSTRING, SA_HOR_CENTER);
 				} else {
-					/* Draw company money, if any */
+					/* Draw company money; grey out if economy server is disconnected. */
 					const Company *c = Company::GetIfValid(_local_company);
 					if (c != nullptr) {
-						DrawString(tr, GetString(STR_JUST_CURRENCY_LONG, c->money), TC_WHITE, SA_HOR_CENTER);
+						bool econ_connected = _economy_connection != nullptr && _economy_connection->IsConnected();
+						TextColour tc = econ_connected ? TC_WHITE : TC_GREY;
+						DrawString(tr, GetString(STR_JUST_CURRENCY_LONG, c->money), tc, SA_HOR_CENTER);
 					}
 				}
 				break;

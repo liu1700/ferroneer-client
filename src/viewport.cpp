@@ -90,6 +90,7 @@
 #include "network/network_func.h"
 #include "framerate_type.h"
 #include "viewport_cmd.h"
+#include "direction_func.h"
 
 #include <forward_list>
 #include <stack>
@@ -97,6 +98,7 @@
 #include "widgets/vehicle_widget.h"
 
 #include "road_gui.h"
+#include "station_cmd.h"
 #include "station_func.h"
 
 #include "table/strings.h"
@@ -106,6 +108,7 @@
 #include "gpu/sprite_command.h"
 #include "gpu/sprite_atlas.h"
 #include "gpu/remap_table.h"
+#include "spritecache.h"
 #endif
 
 #include "safeguards.h"
@@ -1149,26 +1152,59 @@ draw_inner:
 		if (_thd.drawstyle & HT_RECT) {
 			/* Draw road stop building preview: dark silhouette for building shape,
 			 * then prominent green/red selection border for valid/invalid feedback. */
-			if (!_thd.make_square_red) {
+			{
 				RoadStopPreviewInfo preview = GetRoadStopPlacementPreview();
 				if (preview.active) {
+					/* Dry-run the build command to check if this tile is buildable. */
+					RoadStopType stop_type = preview.is_bus ? RoadStopType::Bus : RoadStopType::Truck;
+					CommandCost cost = Command<Commands::BuildRoadStop>::Do(
+						CommandFlagsToDCFlags(GetCommandFlags<Commands::BuildRoadStop>()),
+						ti->tile,
+						1, 1,  /* width, length — single tile */
+						stop_type,
+						preview.is_drive_through,
+						preview.ddir,
+						preview.road_type,
+						preview.spec_class,
+						preview.spec_index,
+						StationID::Invalid(),
+						true   /* adjacent */
+					);
+					bool can_build = cost.Succeeded();
+
 					StationType st = preview.is_bus ? StationType::Bus : StationType::Truck;
 					const DrawTileSprites *t = GetStationTileLayout(st, preview.orientation);
 
-					/* Draw building sequence sprites as dark silhouettes at correct positions.
-					 * Skip ground sprite — the selection border provides ground-level feedback. */
+					PaletteID preview_pal = can_build ? PALETTE_TO_STRUCT_BLUE : PALETTE_TO_STRUCT_RED;
 					for (const DrawTileSeqStruct &dtss : t->GetSequence()) {
 						SpriteID image = dtss.image.sprite;
 						if (GB(image, 0, SPRITE_WIDTH) == 0) continue;
 
 						SpriteID timg = image;
 						SetBit(timg, PALETTE_MODIFIER_TRANSPARENT);
-						AddTileSpriteToDraw(timg, PALETTE_TO_TRANSPARENT,
+						AddTileSpriteToDraw(timg, preview_pal,
 							ti->x + dtss.origin.x, ti->y + dtss.origin.y, ti->z + dtss.origin.z);
-						AddTileSpriteToDraw(timg, PALETTE_TO_TRANSPARENT,
-							ti->x + dtss.origin.x, ti->y + dtss.origin.y, ti->z + dtss.origin.z);
-						AddTileSpriteToDraw(timg, PALETTE_TO_TRANSPARENT,
-							ti->x + dtss.origin.x, ti->y + dtss.origin.y, ti->z + dtss.origin.z);
+					}
+
+					/* Draw entrance direction arrow(s) using one-way road sprites.
+					 * These are isometric ground overlays designed for the map view.
+					 * Sprite layout: SPR_ONEWAY_BASE + (drd-1) + (road_axis == Y ? 3 : 0)
+					 *   DRD_NORTHBOUND(1)-1=0: arrow pointing NE (X-axis) or NW (Y-axis)
+					 *   DRD_SOUTHBOUND(2)-1=1: arrow pointing SW (X-axis) or SE (Y-axis) */
+					static const uint8_t oneway_offset_for_diagdir[] = {
+						0, /* DIAGDIR_NE → X-axis, northbound */
+						4, /* DIAGDIR_SE → Y-axis, southbound */
+						1, /* DIAGDIR_SW → X-axis, southbound */
+						3, /* DIAGDIR_NW → Y-axis, northbound */
+					};
+
+					SpriteID arrow = SPR_ONEWAY_BASE + oneway_offset_for_diagdir[preview.ddir];
+					DrawGroundSpriteAt(arrow, preview_pal, 8, 8, GetPartialPixelZ(8, 8, ti->tileh));
+
+					if (preview.is_drive_through) {
+						DiagDirection opposite = ReverseDiagDir(preview.ddir);
+						SpriteID arrow_opp = SPR_ONEWAY_BASE + oneway_offset_for_diagdir[opposite];
+						DrawGroundSpriteAt(arrow_opp, preview_pal, 8, 8, GetPartialPixelZ(8, 8, ti->tileh));
 					}
 				}
 			}
@@ -1630,15 +1666,24 @@ void ViewportSign::MarkDirty(ZoomLevel maxzoom) const
  */
 static void EmitGpuSpriteCommand(SpriteID image, PaletteID pal,
 	int virt_x, int virt_y, float z_depth,
-	const DrawPixelInfo *dpi, const Viewport *vp)
+	const DrawPixelInfo *dpi, const Viewport *vp,
+	const SubSprite *sub = nullptr)
 {
 	if (_gpu_command_buffer == nullptr || _sprite_atlas == nullptr) return;
+	if (_gpu_suppress_sprite_emit) return;
 
 	SpriteID sprite_id = image & SPRITE_MASK;
 	ZoomLevel zoom = dpi->zoom;
 
-	AtlasEntry entry = _sprite_atlas->Get(sprite_id, zoom);
+	AtlasEntry entry = _sprite_atlas->Get(sprite_id, ZoomLevel::Min);
 	if (!entry.valid) {
+		static uint32_t atlas_reload_logs = 0;
+		if (atlas_reload_logs < 128) {
+			Debug(driver, 1, "[gpu][viewport] atlas reload sprite={} zoom={} image={} pal={}",
+				sprite_id, static_cast<int>(zoom), image, pal);
+			atlas_reload_logs++;
+		}
+
 		if (!SpriteExists(sprite_id) || GetSpriteType(sprite_id) != SpriteType::Normal) {
 			static uint32_t skipped_sprite_logs = 0;
 			if (skipped_sprite_logs < 16) {
@@ -1648,54 +1693,93 @@ static void EmitGpuSpriteCommand(SpriteID image, PaletteID pal,
 			return;
 		}
 
-		/* Lazy upload: trigger cache load which hooks the atlas upload. */
-		GetSprite(sprite_id, SpriteType::Normal);
-		entry = _sprite_atlas->Get(sprite_id, zoom);
-		if (!entry.valid) return;
+		/* Lazy upload: request the missing zoom variant specifically, then force
+		 * a decode pass so spritecache uploads that generated zoom into the atlas
+		 * without pre-filling every zoom level. */
+		UniquePtrSpriteAllocator atlas_upload_allocator;
+		GetRawSprite(sprite_id, SpriteType::Normal, &atlas_upload_allocator, nullptr);
+		entry = _sprite_atlas->Get(sprite_id, ZoomLevel::Min);
+		if (!entry.valid) {
+			static uint32_t atlas_reload_fail_logs = 0;
+			if (atlas_reload_fail_logs < 128) {
+				Debug(driver, 0, "[gpu][viewport] atlas reload failed sprite={} zoom={} image={} pal={}",
+					sprite_id, static_cast<int>(zoom), image, pal);
+				atlas_reload_fail_logs++;
+			}
+			return;
+		}
 	}
 
 	/* Convert viewport virtual coordinates to absolute window pixels.
 	 * Use the viewport origin, not the current dirty-block DPI origin, or
 	 * sprites from different dirty blocks fold onto the left/top of screen. */
-	int screen_x = vp->left + UnScaleByZoom(virt_x - vp->virtual_left, zoom) + entry.x_offs;
-	int screen_y = vp->top + UnScaleByZoom(virt_y - vp->virtual_top, zoom) + entry.y_offs;
+	int screen_x = vp->left + UnScaleByZoom(virt_x - vp->virtual_left, zoom) + UnScaleByZoom(entry.x_offs, zoom);
+	int screen_y = vp->top + UnScaleByZoom(virt_y - vp->virtual_top, zoom) + UnScaleByZoom(entry.y_offs, zoom);
+
+	/* Set up draw rect and UV coords; SubSprite clipping may narrow these. */
+	float draw_x = static_cast<float>(screen_x);
+	float draw_y = static_cast<float>(screen_y);
+	float draw_w = static_cast<float>(UnScaleByZoom(entry.width, zoom));
+	float draw_h = static_cast<float>(UnScaleByZoom(entry.height, zoom));
+	float u0 = entry.u0, v0 = entry.v0, u1 = entry.u1, v1 = entry.v1;
+
+	if (sub != nullptr) {
+		/* SubSprite bounds are relative to the sprite draw origin after sprite
+		 * offsets are applied. Mirror the CPU blitter semantics so clipped GPU
+		 * sprites use the same visible rectangle. */
+		float clip_left   = static_cast<float>(std::max(screen_x + UnScaleByZoom(sub->left, zoom),      screen_x));
+		float clip_top    = static_cast<float>(std::max(screen_y + UnScaleByZoom(sub->top, zoom),       screen_y));
+		float clip_right  = static_cast<float>(std::min(screen_x + UnScaleByZoom(sub->right + 1, zoom), screen_x + static_cast<int>(draw_w)));
+		float clip_bottom = static_cast<float>(std::min(screen_y + UnScaleByZoom(sub->bottom + 1, zoom), screen_y + static_cast<int>(draw_h)));
+
+		if (clip_right <= clip_left || clip_bottom <= clip_top) return;
+
+		/* Remap UV coordinates to the clipped sub-region. */
+		float uv_w = entry.u1 - entry.u0;
+		float uv_h = entry.v1 - entry.v0;
+		u0 = entry.u0 + ((clip_left  - draw_x) / draw_w) * uv_w;
+		v0 = entry.v0 + ((clip_top   - draw_y) / draw_h) * uv_h;
+		u1 = entry.u0 + ((clip_right - draw_x) / draw_w) * uv_w;
+		v1 = entry.v0 + ((clip_bottom - draw_y) / draw_h) * uv_h;
+
+		draw_x = clip_left;
+		draw_y = clip_top;
+		draw_w = clip_right - clip_left;
+		draw_h = clip_bottom - clip_top;
+	}
 
 	/* Determine render mode from palette flags. */
 	uint8_t mode = GPU_SPRITE_NORMAL;
 	uint8_t remap_idx = 0;
+	float tint_r = 1.0f, tint_g = 1.0f, tint_b = 1.0f;
+	uint8_t alpha = 255;
 
-	if (HasBit(image, PALETTE_MODIFIER_TRANSPARENT) || HasBit(pal, PALETTE_MODIFIER_TRANSPARENT)) {
+	/* Preview sprites combine transparent draw mode with struct recolour palettes.
+	 * Only treat struct palettes as explicit green/red preview tint in that case.
+	 * Outside preview rendering, these palettes are normal recolour remaps used by
+	 * regular game sprites (for example some town buildings). */
+	PaletteID pal_stripped = pal & ~((1U << PALETTE_MODIFIER_TRANSPARENT) | (1U << PALETTE_MODIFIER_COLOUR));
+	bool is_transparent_preview = HasBit(image, PALETTE_MODIFIER_TRANSPARENT) || HasBit(pal, PALETTE_MODIFIER_TRANSPARENT);
+	if (pal_stripped == PALETTE_SEL_TILE_RED || (is_transparent_preview && pal_stripped == PALETTE_TO_STRUCT_RED)) {
+		tint_r = 1.0f; tint_g = 0.15f; tint_b = 0.15f;
+		alpha = 210;
+	} else if (pal_stripped == PALETTE_SEL_TILE_BLUE ||
+			(is_transparent_preview && (pal_stripped == PALETTE_TO_STRUCT_BLUE || pal_stripped == PALETTE_TO_STRUCT_GREEN))) {
+		tint_r = 0.15f; tint_g = 1.0f; tint_b = 0.15f;
+		alpha = 210;
+	} else if (HasBit(image, PALETTE_MODIFIER_TRANSPARENT) || HasBit(pal, PALETTE_MODIFIER_TRANSPARENT)) {
 		mode = GPU_SPRITE_TRANSPARENT;
-	} else if (HasBit(pal, PALETTE_MODIFIER_COLOUR)) {
+	} else if (pal != PAL_NONE) {
 		mode = GPU_SPRITE_REMAP;
 		SpriteID recolour_id = pal & SPRITE_MASK;
 		remap_idx = (_remap_table != nullptr) ? _remap_table->GetRowIndex(recolour_id) : 0;
 	}
 
-	/* Determine tint colour and alpha for building preview / tile selection palettes. */
-	float tint_r = 1.0f, tint_g = 1.0f, tint_b = 1.0f;
-	uint8_t alpha = 255;
-
-	PaletteID pal_stripped = pal & ~(PALETTE_MODIFIER_TRANSPARENT | PALETTE_MODIFIER_COLOUR);
-	if (pal_stripped == PALETTE_SEL_TILE_RED || pal_stripped == PALETTE_TO_STRUCT_RED) {
-		/* Invalid placement — red ghost. */
-		tint_r = 1.0f; tint_g = 0.5f; tint_b = 0.5f;
-		alpha = 180;
-	} else if (pal_stripped == PALETTE_SEL_TILE_BLUE || pal_stripped == PALETTE_TO_STRUCT_BLUE) {
-		/* Valid placement / catchment area — green/blue ghost. */
-		tint_r = 0.5f; tint_g = 1.0f; tint_b = 0.5f;
-		alpha = 180;
-	} else if (pal_stripped == PALETTE_TO_STRUCT_GREEN) {
-		/* Valid placement green (e.g. bridge) — green ghost. */
-		tint_r = 0.5f; tint_g = 1.0f; tint_b = 0.5f;
-		alpha = 180;
-	}
-
 	_gpu_command_buffer->Emit(entry.page, GpuSpriteInstance{
-		{static_cast<float>(screen_x), static_cast<float>(screen_y)},
-		{static_cast<float>(entry.width), static_cast<float>(entry.height)},
-		{entry.u0, entry.v0},
-		{entry.u1, entry.v1},
+		{draw_x, draw_y},
+		{draw_w, draw_h},
+		{u0, v0},
+		{u1, v1},
 		z_depth,
 		PackModeRemap(mode, remap_idx, alpha),
 		{tint_r, tint_g, tint_b},
@@ -1712,7 +1796,7 @@ static void ViewportDrawTileSprites(const TileSpriteToDrawVector *tstdv,
 		int idx = 0;
 		for (const TileSpriteToDraw &ts : *tstdv) {
 			float z_depth = 0.999f - 0.499f * (static_cast<float>(idx) / std::max(count, 1));
-			EmitGpuSpriteCommand(ts.image, ts.pal, ts.x, ts.y, z_depth, dpi, vp);
+			EmitGpuSpriteCommand(ts.image, ts.pal, ts.x, ts.y, z_depth, dpi, vp, ts.sub);
 			idx++;
 		}
 		return;
@@ -1860,22 +1944,16 @@ static void ViewportDrawParentSprites(const ParentSpriteToSortVector *psd,
 			float child_z = z_depth - 0.0001f;
 
 			if (ps->image != SPR_EMPTY_BOUNDING_BOX) {
-				EmitGpuSpriteCommand(ps->image, ps->pal, ps->x, ps->y, z_depth, dpi, vp);
+				EmitGpuSpriteCommand(ps->image, ps->pal, ps->x, ps->y, z_depth, dpi, vp, ps->sub);
 			}
 
 			int child_idx = ps->first_child;
 			while (child_idx >= 0) {
 				const ChildScreenSpriteToDraw *cs = &(*csstdv)[child_idx];
 				child_idx = cs->next;
-				int cx, cy;
-				if (cs->relative) {
-					cx = ps->left + cs->x;
-					cy = ps->top + cs->y;
-				} else {
-					cx = ps->x + cs->x;
-					cy = ps->y + cs->y;
-				}
-				EmitGpuSpriteCommand(cs->image, cs->pal, cx, cy, child_z, dpi, vp);
+				int cx = cs->relative ? ps->left + cs->x : ps->x + cs->x;
+				int cy = cs->relative ? ps->top + cs->y : ps->y + cs->y;
+				EmitGpuSpriteCommand(cs->image, cs->pal, cx, cy, child_z, dpi, vp, cs->sub);
 				child_z -= 0.00001f;
 			}
 			idx++;

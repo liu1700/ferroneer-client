@@ -37,4 +37,12 @@ struct RoadStopPreviewInfo {
 };
 RoadStopPreviewInfo GetRoadStopPlacementPreview();
 
+/** Info needed to draw a road depot placement preview. */
+struct RoadDepotPreviewInfo {
+	bool active;             ///< Whether the depot picker window is open.
+	DiagDirection ddir;      ///< Depot entrance direction.
+	RoadType road_type;      ///< Current road type being built.
+};
+RoadDepotPreviewInfo GetRoadDepotPlacementPreview();
+
 #endif /* ROAD_GUI_H */

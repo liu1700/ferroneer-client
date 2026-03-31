@@ -98,6 +98,7 @@
 #include "widgets/vehicle_widget.h"
 
 #include "road_gui.h"
+#include "road_cmd.h"
 #include "station_cmd.h"
 #include "station_func.h"
 
@@ -1206,6 +1207,31 @@ draw_inner:
 						SpriteID arrow_opp = SPR_ONEWAY_BASE + oneway_offset_for_diagdir[opposite];
 						DrawGroundSpriteAt(arrow_opp, preview_pal, 8, 8, GetPartialPixelZ(8, 8, ti->tileh));
 					}
+				}
+			}
+
+			/* Draw road depot building preview: dry-run + blue/red tint + direction arrow. */
+			{
+				RoadDepotPreviewInfo depot_preview = GetRoadDepotPlacementPreview();
+				if (depot_preview.active) {
+					CommandCost cost = Command<Commands::BuildRoadDepot>::Do(
+						CommandFlagsToDCFlags(GetCommandFlags<Commands::BuildRoadDepot>()),
+						ti->tile,
+						depot_preview.road_type,
+						depot_preview.ddir
+					);
+					bool can_build = cost.Succeeded();
+					PaletteID preview_pal = can_build ? PALETTE_TO_STRUCT_BLUE : PALETTE_TO_STRUCT_RED;
+
+					/* Direction arrow for depot entrance. */
+					static const uint8_t oneway_offset_for_diagdir[] = {
+						0, /* DIAGDIR_NE */
+						4, /* DIAGDIR_SE */
+						1, /* DIAGDIR_SW */
+						3, /* DIAGDIR_NW */
+					};
+					SpriteID arrow = SPR_ONEWAY_BASE + oneway_offset_for_diagdir[depot_preview.ddir];
+					DrawGroundSpriteAt(arrow, preview_pal, 8, 8, GetPartialPixelZ(8, 8, ti->tileh));
 				}
 			}
 

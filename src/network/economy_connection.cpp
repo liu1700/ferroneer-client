@@ -18,6 +18,7 @@
 #include "../ferroneer_welcome_gui.h"
 #include "../company_base.h"
 #include "../company_func.h"
+#include "../window_func.h"
 
 #include "../safeguards.h"
 
@@ -183,7 +184,10 @@ void EconomyConnection::ProcessMessage(const nlohmann::json &msg)
 				_economy_data.player_cash = cash;
 				_economy_data.player_cash_valid = true;
 				Company *c = Company::GetIfValid(_local_company);
-				if (c != nullptr) c->money = (Money)std::llround(cash);
+				if (c != nullptr) {
+					c->money = (Money)std::llround(cash);
+					SetWindowDirty(WC_STATUS_BAR, 0);
+				}
 				Debug(net, 3, "[economy] Cash updated via CommandResult: ${:.2f}", cash);
 			}
 
@@ -282,7 +286,10 @@ void EconomyConnection::ProcessMessage(const nlohmann::json &msg)
 
 			/* Override Company::money with authoritative server value (Approach A). */
 			Company *c = Company::GetIfValid(_local_company);
-			if (c != nullptr) c->money = (Money)std::llround(cash);
+			if (c != nullptr) {
+				c->money = (Money)std::llround(cash);
+				SetWindowDirty(WC_STATUS_BAR, 0);
+			}
 
 			Debug(net, 3, "[economy] PlayerCashSync: cash=${:.2f} earned=${:.2f} spent=${:.2f}",
 				cash, total_earned, total_spent);

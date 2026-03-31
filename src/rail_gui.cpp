@@ -76,6 +76,41 @@ static StationPickerSelection _station_gui; ///< Settings of the station picker.
 
 
 static void HandleStationPlacement(TileIndex start, TileIndex end);
+
+/**
+ * Get rail station placement preview info with dry-run validation.
+ * @param tile_org Origin tile for the station footprint.
+ * @return Preview info with active=true if the station picker window is open.
+ */
+RailStationPreviewInfo GetRailStationPlacementPreview(TileIndex tile_org)
+{
+	RailStationPreviewInfo info{};
+	info.active = false;
+
+	if (FindWindowById(WC_BUILD_STATION, TRANSPORT_RAIL) == nullptr) return info;
+
+	info.active = true;
+	info.rail_type = _cur_railtype;
+	info.axis = _station_gui.axis;
+	info.numtracks = _settings_client.gui.station_numtracks;
+	info.plat_len = _settings_client.gui.station_platlength;
+
+	/* Dry-run the build command for the entire station footprint. */
+	CommandCost cost = Command<Commands::BuildRailStation>::Do(
+		CommandFlagsToDCFlags(GetCommandFlags<Commands::BuildRailStation>()),
+		tile_org,
+		_cur_railtype,
+		_station_gui.axis,
+		info.numtracks,
+		info.plat_len,
+		_station_gui.sel_class,
+		_station_gui.sel_type,
+		StationID::Invalid(),
+		true /* adjacent */
+	);
+	info.can_build = cost.Succeeded();
+	return info;
+}
 static void ShowBuildTrainDepotPicker(Window *parent);
 static void ShowBuildWaypointPicker(Window *parent);
 static Window *ShowStationBuilder(Window *parent);

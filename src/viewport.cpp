@@ -99,6 +99,7 @@
 
 #include "road_gui.h"
 #include "road_cmd.h"
+#include "rail_gui.h"
 #include "station_cmd.h"
 #include "station_func.h"
 
@@ -1232,6 +1233,16 @@ draw_inner:
 					};
 					SpriteID arrow = SPR_ONEWAY_BASE + oneway_offset_for_diagdir[depot_preview.ddir];
 					DrawGroundSpriteAt(arrow, preview_pal, 8, 8, GetPartialPixelZ(8, 8, ti->tileh));
+				}
+			}
+
+			/* Draw rail station building preview: tint all tiles in the footprint. */
+			{
+				TileIndex origin = TileVirtXY(_thd.pos.x, _thd.pos.y);
+				RailStationPreviewInfo stn_preview = GetRailStationPlacementPreview(origin);
+				if (stn_preview.active) {
+					PaletteID preview_pal = stn_preview.can_build ? PALETTE_TO_STRUCT_BLUE : PALETTE_TO_STRUCT_RED;
+					DrawGroundSpriteAt(SPR_FLAT_GRASS_TILE, preview_pal, 0, 0, GetPartialPixelZ(8, 8, ti->tileh));
 				}
 			}
 

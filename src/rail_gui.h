@@ -11,6 +11,7 @@
 #define RAIL_GUI_H
 
 #include "rail_type.h"
+#include "direction_type.h"
 #include "dropdown_type.h"
 
 struct Window *ShowBuildRailToolbar(RailType railtype);
@@ -30,5 +31,16 @@ enum SignalCycleSettings : uint8_t {
 	SIGNAL_CYCLE_GROUP = 0, ///< Cycle through current signal group (block or path) only.
 	SIGNAL_CYCLE_ALL = 1,   ///< Cycle through all signals visible to the player.
 };
+
+/** Info needed to draw a rail station placement preview. */
+struct RailStationPreviewInfo {
+	bool active;           ///< Whether the station picker window is open.
+	bool can_build;        ///< Result of dry-run: true if station can be placed here.
+	RailType rail_type;    ///< Current rail type being built.
+	Axis axis;             ///< Station orientation (X or Y).
+	uint8_t numtracks;     ///< Number of platform tracks.
+	uint8_t plat_len;      ///< Platform length in tiles.
+};
+RailStationPreviewInfo GetRailStationPlacementPreview(TileIndex tile_org);
 
 #endif /* RAIL_GUI_H */

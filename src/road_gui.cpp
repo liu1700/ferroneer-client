@@ -117,6 +117,23 @@ RoadStopPreviewInfo GetRoadStopPlacementPreview()
 	return info;
 }
 
+/**
+ * Get road depot placement preview info for transparent building preview.
+ * @return Preview info with active=true if the depot picker window is open.
+ */
+RoadDepotPreviewInfo GetRoadDepotPlacementPreview()
+{
+	RoadDepotPreviewInfo info{};
+	info.active = false;
+
+	if (FindWindowById(WC_BUILD_DEPOT, TRANSPORT_ROAD) == nullptr) return info;
+
+	info.active = true;
+	info.ddir = _road_depot_orientation;
+	info.road_type = _cur_roadtype;
+	return info;
+}
+
 static bool IsRoadStopEverAvailable(const RoadStopSpec *spec, StationType type)
 {
 	if (spec == nullptr) return true;
